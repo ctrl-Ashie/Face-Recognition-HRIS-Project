@@ -3,6 +3,7 @@ from tkinter import PhotoImage
 from PIL import Image, ImageTk
 import cv2
 
+
 # Create the main window
 window = tk.Tk()
 window.title("Login Monitor")
@@ -26,11 +27,48 @@ logo_label.image = Logo
 
 # Create the menu button
 
+def user_logs_clicked():
+    ulwindow = tk.Toplevel(window)
+    ulwindow.title("User Logs")
+    ulwindow.minsize(700, 500)
+    window.config(bg="light gray") 
+
+def log_error_clicked():
+    lewindow = tk.Toplevel(window)
+    lewindow.title("Log Error")
+    lewindow.minsize(700, 500)
+    window.config(bg="light gray")
+    
+def log_summary_clicked():
+    lswindow = tk.Toplevel(window)
+    lswindow.title("Log Summary")
+    lswindow.minsize(700, 500)
+    window.config(bg="light gray")
+
 def menu_clicked(  ):
-    print("filler")
+    click = getattr(menu_button, "clicked", False)
+    if click:
+        menu_button.place(x=680, y=20)
+        menu_button.clicked = False
+        UserLogs.place_forget()
+        LogError.place_forget()
+        LogSummary.place_forget()
+    else:
+        menu_button.place(x=600, y=20)
+        menu_button.clicked = True
+        UserLogs.place(x=600, y=60)
+        LogError.place(x=600, y=100)
+        LogSummary.place(x=600, y=140)
 menu_button = tk.Button(text="Menu",command=menu_clicked)
-menu_button.grid(row=0, column=1, padx=20, pady=0)
 menu_button.place(x=680, y=20)
+menu_button.clicked = False
+
+UserLogs = tk.Button(text="User Logs", command=user_logs_clicked)
+LogError = tk.Button(text="Log Error", command=log_error_clicked)
+LogSummary = tk.Button(text="Log Summary", command=log_summary_clicked)
+
+
+
 
 #Camera
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
