@@ -12,8 +12,8 @@ window.config(bg="light gray")
 
 #Header
 font_py = ("Times New Roman", 19, "bold")
-first_label = tk.Label(text="Login Monitor", font=font_py, bg="navy blue", fg="white", width=50, height=2)
-first_label.grid(column=0, row=0, columnspan=2)
+first_label = tk.Label(text="Login Monitor", font=font_py, bg="#010066", fg="white", width=50, height=2)
+first_label.grid(column=0, row=0, columnspan=2, padx=0, pady=0)
 
 my_logo = "BCLogo.png"
 image = Image.open(my_logo)
@@ -25,7 +25,10 @@ logo_label.grid(column=0, row=1, padx=20, pady=20)
 logo_label.place(x=20, y=5)
 logo_label.image = Logo 
 
-# Create the menu button
+Face_label = tk.Label(text="Verification", font=("Arial", 12, "bold"), bg="#caab2f", fg="white", width=15, height=2)
+Profile_label = tk.Label(text="Profile", font=("Arial", 12, "bold"), bg="#4e4d4d", fg="white", width=15, height=16)
+
+# menu button
 
 def user_logs_clicked():
     ulwindow = tk.Toplevel(window)
@@ -87,10 +90,27 @@ CAM_H = int(CAM_W * native_h / native_w)  # preserve aspect ratio
 cam_label = tk.Label(window)
 cam_label.place(x=50, y=90, width=CAM_W, height=CAM_H)
 
+face_x = 50 + CAM_W + 20
+face_y = 90
+Face_label.place(x=face_x, y=face_y)
+
+profile_x = face_x
+profile_y = face_y + 50
+Profile_label.place(x=profile_x, y=profile_y)
+
 def update_camera():
     ret, frame = cap.read()
     if ret:
         frame = cv2.resize(frame, (CAM_W, CAM_H))
+
+        grid_color = (128, 0, 0)
+        for i in range(1, 3):
+            x = int(CAM_W * i / 3)
+            cv2.line(frame, (x, 0), (x, CAM_H), grid_color, 1)
+        for i in range(1, 3):
+            y = int(CAM_H * i / 3)
+            cv2.line(frame, (0, y), (CAM_W, y), grid_color, 1)
+
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
 
