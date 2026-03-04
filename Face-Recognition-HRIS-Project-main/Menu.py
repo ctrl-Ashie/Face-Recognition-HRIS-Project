@@ -3,6 +3,45 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
+# shared design constants (duplicate of main.py to avoid circular import)
+BG_COLOR = "light gray"
+HEADER_COLOR = "#010066"
+ACCENT_COLOR = "#caab2f"
+FORM_BG = "#4e4d4d"
+STATUS_BG = "#e1e1e1"
+STATUS_FG = "#1f1f1f"
+LOGO_PATH = "BCLogo.png"
+
+_logo_img = None
+
+def get_logo():
+    global _logo_img
+    if _logo_img is None:
+        image = Image.open(LOGO_PATH)
+        image = image.resize((44, 44), Image.Resampling.LANCZOS)
+        _logo_img = ImageTk.PhotoImage(image)
+    return _logo_img
+
+def apply_design(win: tk.Toplevel | tk.Tk, title: str | None = None) -> tk.Frame:
+    win.config(bg=BG_COLOR)
+    if title:
+        win.title(title)
+    header = tk.Frame(win, bg=HEADER_COLOR, padx=8, pady=6)
+    header.pack(side="top", fill="x")
+    logo_lbl = tk.Label(header, image=get_logo(), bg=HEADER_COLOR)
+    logo_lbl.pack(side="left")
+    if title:
+        title_lbl = tk.Label(
+            header,
+            text=title,
+            font=("Times New Roman", 19, "bold"),
+            bg=HEADER_COLOR,
+            fg="white",
+        )
+        title_lbl.pack(side="left", padx=10)
+    return header
+
+
 from face_service import (
 	delete_employee_face_data,
 	list_employee_photo_paths,
@@ -22,8 +61,9 @@ from storage import (
 class AdminPanel(tk.Toplevel):
 	def __init__(self, parent, on_status=None, on_reenroll=None):
 		super().__init__(parent)
-		self.title("Admin Panel")
-		self.geometry("1100x700")
+		# apply the shared design before building inner widgets
+		apply_design(self, "Admin Panel")
+		self.geometry("900x700")
 		self.minsize(1000, 650)
 
 		self.on_status = on_status
@@ -113,8 +153,10 @@ class AdminPanel(tk.Toplevel):
 			("Email", "email"),
 		]
 		for row, (label, key) in enumerate(fields):
-			ttk.Label(right, text=label).grid(row=row, column=0, sticky="w", pady=3)
-			ttk.Entry(right, textvariable=self._entry_vars[key]).grid(row=row, column=1, sticky="ew", pady=3)
+			# use tk.Label to apply themed colors
+			tk_label = tk.Label(right, text=label, bg=FORM_BG, fg="white", font=("Arial", 10, "bold"))
+			tk_label.grid(row=row, column=0, sticky="w", pady=3)
+			tk.Entry(right, textvariable=self._entry_vars[key]).grid(row=row, column=1, sticky="ew", pady=3)
 
 		ttk.Button(right, text="Update Employee", command=self._update_selected_employee).grid(
 			row=6, column=0, columnspan=2, sticky="ew", pady=(6, 10)

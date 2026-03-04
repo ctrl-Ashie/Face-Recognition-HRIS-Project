@@ -3,50 +3,77 @@ from tkinter import PhotoImage
 from PIL import Image, ImageTk
 import cv2
 
+# --- design constants & helpers ------------------------------------------------
+BG_COLOR = "light gray"
+HEADER_COLOR = "#010066"
+ACCENT_COLOR = "#caab2f"  # used for verification/status panels
+FORM_BG = "#4e4d4d"
+STATUS_BG = "#e1e1e1"
+STATUS_FG = "#1f1f1f"
+LOGO_PATH = "BCLogo.png"
+
+_logo_img = None
+
+def get_logo():
+    """Load and cache the logo image used in headers."""
+    global _logo_img
+    if _logo_img is None:
+        image = Image.open(LOGO_PATH)
+        image = image.resize((44, 44), Image.Resampling.LANCZOS)
+        _logo_img = ImageTk.PhotoImage(image)
+    return _logo_img
+
+def apply_design(win: tk.Tk | tk.Toplevel, title: str | None = None) -> tk.Frame:
+    """Apply the shared color scheme + header/logo to any window.
+
+    Returns the header frame so callers can add their own buttons without
+    interfering with the layout.
+    """
+    win.config(bg=BG_COLOR)
+    if title:
+        win.title(title)
+    header = tk.Frame(win, bg=HEADER_COLOR, padx=8, pady=6)
+    header.pack(side="top", fill="x")
+    logo_lbl = tk.Label(header, image=get_logo(), bg=HEADER_COLOR)
+    logo_lbl.pack(side="left")
+    if title:
+        title_lbl = tk.Label(
+            header,
+            text=title,
+            font=("Times New Roman", 19, "bold"),
+            bg=HEADER_COLOR,
+            fg="white",
+        )
+        title_lbl.pack(side="left", padx=10)
+    return header
+
+# ------------------------------------------------------------------------------
+
 
 # Create the main window
 window = tk.Tk()
-window.title("Login Monitor")
+apply_design(window, "Login Monitor")
 window.minsize(700, 500)
-window.config(bg="light gray")
 
-#Header
-font_py = ("Times New Roman", 19, "bold")
-first_label = tk.Label(text="Login Monitor", font=font_py, bg="#010066", fg="white", width=50, height=2)
-first_label.grid(column=0, row=0, columnspan=2, padx=0, pady=0)
 
-my_logo = "BCLogo.png"
-image = Image.open(my_logo)
-image = image.resize((50, 50), Image.Resampling.LANCZOS)
-Logo = ImageTk.PhotoImage(image)
-
-logo_label = tk.Label(window, image=Logo)
-logo_label.grid(column=0, row=1, padx=20, pady=20)
-logo_label.place(x=20, y=5)
-logo_label.image = Logo 
-
-Face_label = tk.Label(text="Verification", font=("Arial", 12, "bold"), bg="#caab2f", fg="white", width=15, height=2)
-Profile_label = tk.Label(text="Profile", font=("Arial", 12, "bold"), bg="#4e4d4d", fg="white", width=15, height=16)
+Face_label = tk.Label(text="Verification", font=("Arial", 12, "bold"), bg=ACCENT_COLOR, fg="white", width=15, height=2)
+Profile_label = tk.Label(text="Profile", font=("Arial", 12, "bold"), bg=FORM_BG, fg="white", width=15, height=16)
 
 # menu button
 
 def user_logs_clicked():
     ulwindow = tk.Toplevel(window)
-    ulwindow.title("User Logs")
+    apply_design(ulwindow, "User Logs")
     ulwindow.minsize(700, 500)
-    window.config(bg="light gray") 
 
 def log_error_clicked():
     lewindow = tk.Toplevel(window)
-    lewindow.title("Log Error")
+    apply_design(lewindow, "Log Error")
     lewindow.minsize(700, 500)
-    window.config(bg="light gray")
-    
 def log_summary_clicked():
     lswindow = tk.Toplevel(window)
-    lswindow.title("Log Summary")
+    apply_design(lswindow, "Log Summary")
     lswindow.minsize(700, 500)
-    window.config(bg="light gray")
 
 def menu_clicked(  ):
     click = getattr(menu_button, "clicked", False)

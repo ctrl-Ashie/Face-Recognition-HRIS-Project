@@ -7,6 +7,46 @@ from PIL import Image, ImageTk
 import numpy as np
 
 from Menu import AdminPanel
+
+# --- shared design constants --------------------------------------------------
+BG_COLOR = "light gray"
+HEADER_COLOR = "#010066"
+ACCENT_COLOR = "#caab2f"
+FORM_BG = "#4e4d4d"
+STATUS_BG = "#e1e1e1"
+STATUS_FG = "#1f1f1f"
+LOGO_PATH = "BCLogo.png"
+
+_logo_img = None
+
+def get_logo():
+    global _logo_img
+    if _logo_img is None:
+        image = Image.open(LOGO_PATH)
+        image = image.resize((44, 44), Image.Resampling.LANCZOS)
+        _logo_img = ImageTk.PhotoImage(image)
+    return _logo_img
+
+def apply_design(win: tk.Toplevel | tk.Tk, title: str | None = None) -> tk.Frame:
+    win.config(bg=BG_COLOR)
+    if title:
+        win.title(title)
+    header = tk.Frame(win, bg=HEADER_COLOR, padx=8, pady=6)
+    header.pack(side="top", fill="x")
+    logo_lbl = tk.Label(header, image=get_logo(), bg=HEADER_COLOR)
+    logo_lbl.pack(side="left")
+    if title:
+        title_lbl = tk.Label(
+            header,
+            text=title,
+            font=("Times New Roman", 19, "bold"),
+            bg=HEADER_COLOR,
+            fg="white",
+        )
+        title_lbl.pack(side="left", padx=10)
+    return header
+
+# -----------------------------------------------------------------------------
 from face_service import (
     DEFAULT_VERIFY_THRESHOLD,
     IMPOSTOR_MARGIN,
@@ -40,8 +80,8 @@ if __name__ == "__main__":
 
     # Main window
     window = tk.Tk()
-    window.title("Login Monitor")
-    window.minsize(1180, 760)
+    header = apply_design(window, "Login Monitor")
+    window.minsize(900, 600)
     window.config(bg="light gray")
     window.columnconfigure(0, weight=1)
     window.rowconfigure(1, weight=1)
@@ -74,7 +114,7 @@ if __name__ == "__main__":
 
     def build_text_window(title, lines):
         child = tk.Toplevel(window)
-        child.title(title)
+        apply_design(child, title)
         child.geometry("900x550")
         text_box = tk.Text(child, wrap="word")
         text_box.pack(fill="both", expand=True)
@@ -119,6 +159,7 @@ if __name__ == "__main__":
         if admin_panel is not None and admin_panel.winfo_exists():
             admin_panel.lift()
             return
+        # using apply_design inside panel so header shows correctly
         admin_panel = AdminPanel(window, on_status=set_status, on_reenroll=start_reenroll_for_employee)
 
 
@@ -477,42 +518,21 @@ if __name__ == "__main__":
         cap.release()
         window.destroy()
 
-
-    # Header
-    header_frame = tk.Frame(window, bg="#010066", padx=8, pady=6)
-    header_frame.grid(row=0, column=0, sticky="ew")
-    header_frame.columnconfigure(1, weight=1)
-
-    image = Image.open("BCLogo.png")
-    image = image.resize((44, 44), Image.Resampling.LANCZOS)
-    logo_img = ImageTk.PhotoImage(image)
-    logo_label = tk.Label(header_frame, image=logo_img, bg="#010066")
-    logo_label.grid(row=0, column=0, padx=(2, 10), sticky="w")
-
-    title_label = tk.Label(
-        header_frame,
-        text="Login Monitor",
-        font=("Times New Roman", 19, "bold"),
-        bg="#010066",
-        fg="white",
-    )
-    title_label.grid(row=0, column=1, sticky="w")
-
-    header_buttons = tk.Frame(header_frame, bg="#010066")
-    header_buttons.grid(row=0, column=2, sticky="e")
+    header_buttons = tk.Frame(header, bg=HEADER_COLOR)
+    header_buttons.pack(side="right")
     tk.Button(header_buttons, text="User Logs", command=user_logs_clicked).pack(side="left", padx=3)
     tk.Button(header_buttons, text="Log Error", command=log_error_clicked).pack(side="left", padx=3)
     tk.Button(header_buttons, text="Summary", command=log_summary_clicked).pack(side="left", padx=3)
     tk.Button(header_buttons, text="Admin Panel", command=open_admin_panel).pack(side="left", padx=3)
 
-    # Content layout (non-overlapping)
     content_frame = tk.Frame(window, bg="light gray", padx=10, pady=10)
-    content_frame.grid(row=1, column=0, sticky="nsew")
+    content_frame.pack(side="top", fill="both", expand=True)
     content_frame.columnconfigure(0, weight=3)
     content_frame.columnconfigure(1, weight=2)
     content_frame.rowconfigure(0, weight=1)
 
-    camera_frame = tk.Frame(content_frame, bg="#111111", bd=2, relief="ridge")
+    # Camera container: use flat relief and zero border to avoid a visible black outline
+    camera_frame = tk.Frame(content_frame, bg="black", bd=0, relief="flat")
     camera_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
     camera_frame.columnconfigure(0, weight=1)
     camera_frame.rowconfigure(0, weight=1)
@@ -523,11 +543,12 @@ if __name__ == "__main__":
     if ret:
         native_h, native_w = test_frame.shape[:2]
     else:
-        native_w, native_h = 640, 480
+        native_w, native_h = 700, 700
 
-    CAM_W = 720
+    CAM_W = 600
     CAM_H = int(CAM_W * native_h / native_w)
-    cam_label = tk.Label(camera_frame, bg="black")
+    # label showing camera image; remove highlight/border thickness to avoid frame border
+    cam_label = tk.Label(camera_frame, bg="black", bd=0, highlightthickness=0)
     cam_label.grid(row=0, column=0, sticky="nsew")
 
     side_frame = tk.Frame(content_frame, bg="#4e4d4d", bd=2, relief="ridge")
@@ -603,8 +624,10 @@ if __name__ == "__main__":
         relief="sunken",
         padx=8,
     )
-    status_label.grid(row=2, column=0, sticky="ew")
+    status_label.pack(side="bottom", fill="x")
 
     window.protocol("WM_DELETE_WINDOW", on_close)
     update_camera()
     window.mainloop()
+    
+    #end
