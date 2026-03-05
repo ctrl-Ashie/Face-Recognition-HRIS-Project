@@ -8,12 +8,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import numpy as np
 
-# --- design constants & helpers ------------------------------------------------
+#design constants & helpers 
 BG_COLOR = "light gray"
 HEADER_COLOR = "#010066"
-ACCENT_COLOR = "#caab2f"  # used for verification/status panels
-FORM_BG = "#4e4d4d"
-STATUS_BG = "#e1e1e1"
+ACCENT_COLOR = "#caab2f" 
+FORM_BG = "#e1e1e1"
+STATUS_BG = "light gray"
 STATUS_FG = "#1f1f1f"
 LOGO_PATH = "BCLogo.png"
 
@@ -48,17 +48,15 @@ def apply_design(win: tk.Tk | tk.Toplevel, title: str | None = None) -> tk.Frame
         title_lbl.pack(side="left", padx=10)
     return header
 
-# ------------------------------------------------------------------------------
-
 
 # Create the main window
 window = tk.Tk()
 apply_design(window, "Login Monitor")
-window.minsize(700, 500)
+window.minsize(750, 500)
 
 
 Face_label = tk.Label(text="Verification", font=("Arial", 12, "bold"), bg=ACCENT_COLOR, fg="white", width=15, height=2)
-Profile_label = tk.Label(text="Profile", font=("Arial", 12, "bold"), bg=FORM_BG, fg="white", width=15, height=16)
+Profile_label = tk.Label(text="Profile", font=("Arial", 12, "bold"), bg=FORM_BG, fg="black", width=15, height=16)
 
 # menu button
 
@@ -69,21 +67,19 @@ def user_logs_clicked():
     
     table_frame = tk.Frame(ulwindow, bg="light gray")
     table_frame.pack(fill="both", expand=True, padx=10, pady=10)
-    
-    # Configure grid columns
+
     table_frame.columnconfigure(0, weight=1)
     table_frame.columnconfigure(1, weight=1)
     table_frame.columnconfigure(2, weight=1)
     table_frame.columnconfigure(3, weight=1)
     
-    # Create headers
     headers = ["No. of Logs", "Day", "Time In", "Time Out"]
     for col, header_text in enumerate(headers):
         header_lbl = tk.Label(
             table_frame,
             text=header_text,
             font=("Arial", 10, "bold"),
-            bg="#b39306",
+            bg=HEADER_COLOR,
             fg="white",
             padx=10,
             pady=10,
@@ -111,7 +107,8 @@ def user_logs_clicked():
                 padx=10,
                 pady=10,
                 relief="solid",
-                borderwidth=1
+                borderwidth=2,
+                highlightbackground=ACCENT_COLOR
             )
             cell_lbl.grid(column=col_idx, row=row_idx, sticky="nsew", padx=2, pady=2)
 
@@ -157,13 +154,14 @@ def log_error_clicked():
             cell_lbl = tk.Label(
                 table_frame,
                 text=cell_data,
-                font=("Arial", 10, "bold"),
-                bg="light gray",
+                font=("Arial", 10, "normal"),
+                bg="white",
                 fg="black",
                 padx=10,
                 pady=10,
                 relief="solid",
-                borderwidth=1
+                borderwidth=2,
+                highlightbackground=ACCENT_COLOR
             )
             cell_lbl.grid(column=col_idx, row=row_idx, sticky="nsew", padx=2, pady=2)
             
@@ -288,20 +286,32 @@ def log_summary_clicked():
             )
             late_lbl.pack(pady=5, padx=5, fill="x")
             
+            # Status description
+            status_desc = tk.Label(
+                stats_content_frame,
+                text="If status below is red, please speak to the supervisor",
+                font=("Arial", 9, "normal"),
+                bg="white",
+                fg="black",
+                wraplength=150,
+                justify="left"
+            )
+            status_desc.pack(pady=(10, 5), padx=5, fill="x")
+            
             # Status indicator
-            status_text = "Late" if late_count > early_count else "On Time"
+            status_text = "LATE" if late_count > early_count else "ON TIME"
             status_bg = "#9a2925" if late_count > early_count else "#5cb85c"
             status_lbl = tk.Label(
-                status_frame,
+                stats_content_frame,
                 text=status_text,
                 font=("Arial", 11, "bold"),
                 bg=status_bg,
                 fg="white",
                 pady=5
             )
-            status_lbl.pack(fill="x")
+            status_lbl.pack(pady=5, padx=5, fill="x")
             
-            fig = Figure(figsize=(5, 4), dpi=100)
+            fig = Figure(figsize=(5, 3), dpi=100)
             ax = fig.add_subplot(111)
             
             days = list(log_data.keys())
@@ -314,13 +324,14 @@ def log_summary_clicked():
                 avg_times.append(np.mean(times))
             
             # Plot line graph
-            ax.plot(day_numbers, avg_times, marker="o", linewidth=2, markersize=8, color=HEADER_COLOR)
+            ax.plot(day_numbers, avg_times, marker="o", linewidth=2, markersize=8, color=ACCENT_COLOR)
             
             ax.set_xticks(day_numbers)
-            ax.set_xticklabels(days, rotation=45)
-            ax.set_ylabel("Time (24h format)", fontsize=9)
-            ax.set_xlabel("Day", fontsize=9)
-            ax.set_title("Time In by Day", fontsize=9, fontweight="bold")
+            ax.set_xticklabels(days, rotation=45, color=HEADER_COLOR)
+            ax.set_ylabel("Time (24h format)", fontsize=9, color=HEADER_COLOR)
+            ax.set_xlabel("Day", fontsize=9, color=HEADER_COLOR)
+            ax.set_title("Time In by Day", fontsize=9, fontweight="bold", color=HEADER_COLOR)
+            ax.tick_params(axis="y", labelcolor=HEADER_COLOR)
             ax.grid(True, alpha=0.3)
             ax.set_ylim([7, 9])
             fig.tight_layout()
@@ -363,33 +374,34 @@ def log_summary_clicked():
                 relief="solid",
                 borderwidth=1
             )
-            
-            exact_lbl = tk.Label(
-                stats_content_frame,
-                text=f"Exact: {exact_count}",
-                font=("Arial", 11),
-                bg=ACCENT_COLOR,
-                fg="Black",
-                relief="solid",
-                borderwidth=1
-            )
-            exact_lbl.pack(pady=5, padx=5, fill="x")
-            overtime_lbl.pack(pady=5, padx=5, fill="x")
             undertime_lbl.pack(pady=5, padx=5, fill="x")
             
-            status_text = "Undertime" if undertime_count > overtime_count else "Overtime"
+            # Status description
+            status_desc = tk.Label(
+                stats_content_frame,
+                text="If status below is red, please speak to the supervisor",
+                font=("Arial", 9, "normal"),
+                bg="white",
+                fg="black",
+                wraplength=150,
+                justify="left"
+            )
+            status_desc.pack(pady=(10, 5), padx=5, fill="x")
+            
+            # Status indicator
+            status_text = "UNDERTIME" if undertime_count > overtime_count else "OVERTIME"
             status_bg = "#d9534f" if undertime_count > overtime_count else "#5cb85c"
             status_lbl = tk.Label(
-                status_frame,
+                stats_content_frame,
                 text=status_text,
                 font=("Arial", 11, "bold"),
                 bg=status_bg,
                 fg="white",
                 pady=5
             )
-            status_lbl.pack(fill="x")
+            status_lbl.pack(pady=5, padx=5, fill="x")
             
-            fig = Figure(figsize=(5, 4), dpi=100)
+            fig = Figure(figsize=(5, 3), dpi=100)
             ax = fig.add_subplot(111)
             
             days = list(log_data.keys())
@@ -402,14 +414,13 @@ def log_summary_clicked():
                 avg_times.append(np.mean(times))
             
             # Plot line graph
-            ax.plot(day_numbers, avg_times, marker="o", linewidth=2, markersize=8, color=HEADER_COLOR)
-            
-            
+            ax.plot(day_numbers, avg_times, marker="o", linewidth=2, markersize=8, color=ACCENT_COLOR)
             ax.set_xticks(day_numbers)
-            ax.set_xticklabels(days, rotation=45)
-            ax.set_ylabel("Time (24h format)", fontsize=10)
-            ax.set_xlabel("Day", fontsize=10)
-            ax.set_title("Time Out by Day", fontsize=12, fontweight="bold")
+            ax.set_xticklabels(days, rotation=45, color=HEADER_COLOR)
+            ax.set_ylabel("Time (24h format)", fontsize=10, color=HEADER_COLOR)
+            ax.set_xlabel("Day", fontsize=10, color=HEADER_COLOR)
+            ax.set_title("Time Out by Day", fontsize=12, fontweight="bold", color=HEADER_COLOR)
+            ax.tick_params(axis="y", labelcolor=HEADER_COLOR)
             ax.grid(True, alpha=0.3)
             ax.set_ylim([16, 18.5])
             fig.tight_layout()
@@ -434,16 +445,16 @@ def menu_clicked(  ):
         UserLogs.place(x=600, y=60)
         LogError.place(x=600, y=100)
         LogSummary.place(x=600, y=140)
-menu_button = tk.Button(text="Menu",command=menu_clicked)
+menu_button = tk.Button(text="Menu", command=menu_clicked, bg=ACCENT_COLOR, fg="black")
 menu_button.place(x=680, y=20)
 menu_button.clicked = False
 
 UserLogs = tk.Button(text="User Logs", command=user_logs_clicked,
-                     width=15, height=2, bg=STATUS_BG, fg=STATUS_FG)
+                     width=15, height=2, bg=ACCENT_COLOR, fg="black", activebackground=HEADER_COLOR, activeforeground="white")
 LogError = tk.Button(text="Log Error", command=log_error_clicked,
-                     width=15, height=2, bg=STATUS_BG, fg=STATUS_FG)
+                     width=15, height=2, bg=ACCENT_COLOR, fg="black", activebackground=HEADER_COLOR, activeforeground="white")
 LogSummary = tk.Button(text="Log Summary", command=log_summary_clicked,
-                       width=15, height=2, bg=STATUS_BG, fg=STATUS_FG)
+                       width=15, height=2, bg=ACCENT_COLOR, fg="black", activebackground=HEADER_COLOR, activeforeground="white")
 
 
 
