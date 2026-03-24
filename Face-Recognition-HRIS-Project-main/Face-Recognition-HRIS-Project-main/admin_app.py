@@ -7,7 +7,20 @@ from tkinter import messagebox
 from dotenv import load_dotenv
 
 from Menu import AdminPanel
+from modern_ui import (
+    ModernStyles,
+    ModernButton,
+    PrimaryButton,
+    SecondaryButton,
+    ModernCard,
+    ModernLabel,
+    create_gradient_header,
+)
 from storage import init_db, get_employee, get_connection, _using_supabase, _supabase_request
+
+BG_COLOR = "#f0f2f5"
+HEADER_COLOR = "#010066"
+ACCENT_COLOR = "#caab2f"
 
 
 def verify_password(password: str, hashed: str) -> bool:
@@ -25,7 +38,8 @@ class AdminLauncher:
 
         self.root = tk.Tk()
         self.root.title("HRIS Admin / Manager Login")
-        self.root.minsize(450, 300)
+        self.root.minsize(500, 380)
+        self.root.config(bg=BG_COLOR)
 
         self._ensure_sysadmin_secret()
 
@@ -45,7 +59,6 @@ class AdminLauncher:
                 
                 os.environ["HRIS_SYSADMIN_SECRET"] = new_secret
                 
-                # Show popup to user so they know where to find it.
                 self.root.after(500, lambda: messagebox.showinfo(
                     "First Time Configuration", 
                     f"Welcome!\n\n"
@@ -56,63 +69,160 @@ class AdminLauncher:
             except Exception as e:
                 print(f"Could not automatically write SysAdmin Secret to .env: {e}")
 
+    def _create_header(self, parent):
+        header = tk.Frame(parent, bg=HEADER_COLOR)
+        header.pack(fill="x")
+        
+        header_canvas = tk.Canvas(header, height=70, bg=HEADER_COLOR, highlightthickness=0)
+        header_canvas.pack(fill="x")
+        header_canvas.update_idletasks()
+        
+        w = header_canvas.winfo_width()
+        if w < 100:
+            w = 500
+        
+        create_gradient_header(header_canvas, w, 70)
+        
+        header_canvas.create_text(w//2, 35, text="Manager Portal", fill="#ffffff", 
+                                  font=("Segoe UI", 22, "bold"), anchor="center")
+        header_canvas.create_text(w//2, 55, text="HRIS Admin System", fill="#caab2f", 
+                                  font=("Segoe UI", 11), anchor="center")
+
     def _build_login_ui(self):
         for widget in self.root.winfo_children():
             widget.destroy()
+        
+        self._create_header(self.root)
             
-        container = tk.Frame(self.root, padx=18, pady=16)
+        container = tk.Frame(self.root, bg=BG_COLOR, padx=30, pady=20)
         container.pack(fill="both", expand=True)
 
-        tk.Label(container, text="Manager Portal Login", font=("Arial", 16, "bold")).pack(anchor="w", pady=(0, 10))
+        card = ModernCard(container, padx=25, pady=20)
+        card.pack(fill="both", expand=True)
 
-        form = tk.Frame(container)
-        form.pack(fill="x")
+        form = card.inner
 
-        tk.Label(form, text="Manager ID", width=14, anchor="w").grid(row=0, column=0, sticky="w", pady=4)
-        tk.Label(form, text="Password", width=14, anchor="w").grid(row=1, column=0, sticky="w", pady=4)
+        tk.Label(form, text="Manager Login", bg=ModernStyles.CARD_BG, fg=HEADER_COLOR, 
+                font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 20))
 
-        self.username_var = tk.StringVar()
-        self.password_var = tk.StringVar()
-        tk.Entry(form, textvariable=self.username_var).grid(row=0, column=1, sticky="ew", pady=4)
-        tk.Entry(form, textvariable=self.password_var, show="*").grid(row=1, column=1, sticky="ew", pady=4)
-        form.columnconfigure(1, weight=1)
+        field_frame = tk.Frame(form, bg=ModernStyles.CARD_BG)
+        field_frame.pack(fill="x", pady=(0, 20))
 
-        btn_container = tk.Frame(container)
-        btn_container.pack(fill="x", pady=(12, 8))
-        tk.Button(btn_container, text="Login", command=self._login, bg="#caab2f").pack(side="right", padx=5)
-        tk.Button(btn_container, text="Register Manager", command=self._show_register_ui).pack(side="left", padx=5)
+        tk.Label(field_frame, text="Manager ID", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+                width=14, anchor="w", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=12)
         
-        tk.Label(container, textvariable=self.status_var, anchor="w").pack(fill="x")
+        self.username_var = tk.StringVar()
+        username_entry = tk.Entry(
+            field_frame, textvariable=self.username_var,
+            font=("Segoe UI", 11), bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY,
+            relief="flat", highlightthickness=1,
+            highlightcolor=ACCENT_COLOR, highlightbackground=ModernStyles.BORDER_COLOR,
+            insertbackground=HEADER_COLOR
+        )
+        username_entry.grid(row=0, column=1, sticky="ew", pady=12)
+        field_frame.columnconfigure(1, weight=1)
+
+        tk.Label(field_frame, text="Password", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+                width=14, anchor="w", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", pady=12)
+        
+        self.password_var = tk.StringVar()
+        password_entry = tk.Entry(
+            field_frame, textvariable=self.password_var, show="*",
+            font=("Segoe UI", 11), bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY,
+            relief="flat", highlightthickness=1,
+            highlightcolor=ACCENT_COLOR, highlightbackground=ModernStyles.BORDER_COLOR,
+            insertbackground=HEADER_COLOR
+        )
+        password_entry.grid(row=1, column=1, sticky="ew", pady=12)
+
+        btn_container = tk.Frame(form, bg=ModernStyles.CARD_BG)
+        btn_container.pack(fill="x", pady=(0, 15))
+        
+        register_btn = SecondaryButton(btn_container, text="Register Manager", 
+                                       command=self._show_register_ui, width=140)
+        register_btn.pack(side="left")
+        
+        login_btn = PrimaryButton(btn_container, text="Login", command=self._login, width=100)
+        login_btn.pack(side="right")
+        
+        status_label = tk.Label(form, textvariable=self.status_var, bg=ModernStyles.CARD_BG, 
+                                fg=ModernStyles.TEXT_SECONDARY, font=("Segoe UI", 9), anchor="w")
+        status_label.pack(fill="x")
 
     def _show_register_ui(self):
         for widget in self.root.winfo_children():
             widget.destroy()
 
-        container = tk.Frame(self.root, padx=18, pady=16)
+        self._create_header(self.root)
+
+        container = tk.Frame(self.root, bg=BG_COLOR, padx=30, pady=20)
         container.pack(fill="both", expand=True)
 
-        tk.Label(container, text="Register Manager Account", font=("Arial", 16, "bold")).pack(anchor="w", pady=(0, 10))
-        tk.Label(container, text="Note: Upgrades an existing employee account to Manager.", fg="#555").pack(anchor="w", pady=(0, 10))
+        card = ModernCard(container, padx=25, pady=20)
+        card.pack(fill="both", expand=True)
 
-        form = tk.Frame(container)
-        form.pack(fill="x")
+        form = card.inner
 
-        tk.Label(form, text="SysAdmin Secret*", width=16, anchor="w").grid(row=0, column=0, sticky="w", pady=4)
-        tk.Label(form, text="Employee ID", width=16, anchor="w").grid(row=1, column=0, sticky="w", pady=4)
-        tk.Label(form, text="New Password", width=16, anchor="w").grid(row=2, column=0, sticky="w", pady=4)
+        tk.Label(form, text="Register Manager Account", bg=ModernStyles.CARD_BG, fg=HEADER_COLOR, 
+                font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 8))
+        
+        tk.Label(form, text="Note: Upgrades an existing employee account to Manager.", 
+                bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_SECONDARY, 
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 20))
 
+        field_frame = tk.Frame(form, bg=ModernStyles.CARD_BG)
+        field_frame.pack(fill="x", pady=(0, 20))
+
+        tk.Label(field_frame, text="SysAdmin Secret*", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+                width=16, anchor="w", font=("Segoe UI", 10)).grid(row=0, column=0, sticky="w", pady=12)
+        
         self.secret_var = tk.StringVar()
-        self.reg_id_var = tk.StringVar()
-        self.reg_pass_var = tk.StringVar()
-        tk.Entry(form, textvariable=self.secret_var, show="*").grid(row=0, column=1, sticky="ew", pady=4)
-        tk.Entry(form, textvariable=self.reg_id_var).grid(row=1, column=1, sticky="ew", pady=4)
-        tk.Entry(form, textvariable=self.reg_pass_var, show="*").grid(row=2, column=1, sticky="ew", pady=4)
-        form.columnconfigure(1, weight=1)
+        secret_entry = tk.Entry(
+            field_frame, textvariable=self.secret_var, show="*",
+            font=("Segoe UI", 11), bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY,
+            relief="flat", highlightthickness=1,
+            highlightcolor=ACCENT_COLOR, highlightbackground=ModernStyles.BORDER_COLOR,
+            insertbackground=HEADER_COLOR
+        )
+        secret_entry.grid(row=0, column=1, sticky="ew", pady=12)
+        field_frame.columnconfigure(1, weight=1)
 
-        btn_container = tk.Frame(container)
-        btn_container.pack(fill="x", pady=(12, 8))
-        tk.Button(btn_container, text="Register", command=self._register_manager, bg="#caab2f").pack(side="right", padx=5)
-        tk.Button(btn_container, text="Back to Login", command=self._build_login_ui).pack(side="left", padx=5)
+        tk.Label(field_frame, text="Employee ID", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+                width=16, anchor="w", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", pady=12)
+        
+        self.reg_id_var = tk.StringVar()
+        reg_id_entry = tk.Entry(
+            field_frame, textvariable=self.reg_id_var,
+            font=("Segoe UI", 11), bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY,
+            relief="flat", highlightthickness=1,
+            highlightcolor=ACCENT_COLOR, highlightbackground=ModernStyles.BORDER_COLOR,
+            insertbackground=HEADER_COLOR
+        )
+        reg_id_entry.grid(row=1, column=1, sticky="ew", pady=12)
+
+        tk.Label(field_frame, text="New Password", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+                width=16, anchor="w", font=("Segoe UI", 10)).grid(row=2, column=0, sticky="w", pady=12)
+        
+        self.reg_pass_var = tk.StringVar()
+        reg_pass_entry = tk.Entry(
+            field_frame, textvariable=self.reg_pass_var, show="*",
+            font=("Segoe UI", 11), bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY,
+            relief="flat", highlightthickness=1,
+            highlightcolor=ACCENT_COLOR, highlightbackground=ModernStyles.BORDER_COLOR,
+            insertbackground=HEADER_COLOR
+        )
+        reg_pass_entry.grid(row=2, column=1, sticky="ew", pady=12)
+
+        btn_container = tk.Frame(form, bg=ModernStyles.CARD_BG)
+        btn_container.pack(fill="x", pady=(0, 15))
+        
+        back_btn = SecondaryButton(btn_container, text="Back to Login", 
+                                   command=self._build_login_ui, width=130)
+        back_btn.pack(side="left")
+        
+        register_btn = PrimaryButton(btn_container, text="Register", 
+                                     command=self._register_manager, width=100)
+        register_btn.pack(side="right")
 
     def _register_manager(self):
         expected_secret = os.getenv("HRIS_SYSADMIN_SECRET")
@@ -151,13 +261,12 @@ class AdminLauncher:
             messagebox.showwarning("Login", "Enter both ID and password.")
             return
 
-        # Check DB
         emp = get_employee(username)
         if not emp or not emp.get("is_admin"):
             messagebox.showerror("Login", "Invalid Manager ID or not a manager.")
             return
 
-        if not verify_password(password, emp.get("password_hash")):
+        if not verify_password(password, emp.get("password_hash", "")):
             messagebox.showerror("Login", "Invalid password.")
             return
 

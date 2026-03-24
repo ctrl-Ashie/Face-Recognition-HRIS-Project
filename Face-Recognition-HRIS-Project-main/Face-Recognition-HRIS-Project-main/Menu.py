@@ -8,6 +8,15 @@ from face_service import (
 	list_employee_photo_paths,
 	rename_employee_face_folder,
 )
+from modern_ui import (
+    ModernStyles,
+    ModernButton,
+    PrimaryButton,
+    SecondaryButton,
+    DangerButton,
+    ModernCard,
+    create_gradient_header,
+)
 from storage import (
 	delete_employee_hard,
 	get_daily_summary,
@@ -23,15 +32,20 @@ from storage import (
 	update_verification_log,
 )
 
+BG_COLOR = "#f0f2f5"
+HEADER_COLOR = "#010066"
+ACCENT_COLOR = "#caab2f"
+
 
 class AdminPanel(tk.Toplevel):
 	"""Admin portal for global employee management, log inspection, and log editing."""
 
 	def __init__(self, parent, on_status=None, on_reenroll=None, current_manager_id=None):
 		super().__init__(parent)
-		self.title("Admin Panel")
+		self.title("Admin Panel - HRIS Management")
 		self.geometry("1100x700")
 		self.minsize(1000, 650)
+		self.config(bg=BG_COLOR)
 
 		self.on_status = on_status
 		self.on_reenroll = on_reenroll
@@ -46,20 +60,48 @@ class AdminPanel(tk.Toplevel):
 		if callable(self.on_status):
 			self.on_status(message)
 
+	def _create_header(self):
+		header = tk.Frame(self, bg=HEADER_COLOR)
+		header.pack(fill="x")
+		
+		header_canvas = tk.Canvas(header, height=70, bg=HEADER_COLOR, highlightthickness=0)
+		header_canvas.pack(fill="x")
+		header_canvas.update_idletasks()
+		
+		w = header_canvas.winfo_width()
+		if w < 100:
+			w = 1100
+		
+		create_gradient_header(header_canvas, w, 70)
+		
+		header_canvas.create_text(w//2, 28, text="HRIS Admin Panel", fill="#ffffff", 
+								  font=("Segoe UI", 20, "bold"), anchor="center")
+		header_canvas.create_text(w//2, 52, text=f"Manager: {self.current_manager_id}", fill="#caab2f", 
+								  font=("Segoe UI", 11), anchor="center")
+
 	def _build_ui(self):
-		root = ttk.Frame(self, padding=8)
+		self._create_header()
+		
+		root = tk.Frame(self, bg=BG_COLOR, padx=10, pady=10)
 		root.pack(fill="both", expand=True)
 
-		notebook = ttk.Notebook(root)
+		notebook_style = ttk.Style()
+		notebook_style.configure("Modern.TNotebook", background=BG_COLOR, tabposition="n")
+		notebook_style.configure("Modern.TNotebook.Tab", padding=(16, 8), font=("Segoe UI", 10, "bold"))
+		
+		notebook = ttk.Notebook(root, style="Modern.TNotebook")
 		notebook.pack(fill="both", expand=True)
 
-		self.tab_employees = ttk.Frame(notebook)
-		self.tab_logs = ttk.Frame(notebook)
-		self.tab_summary = ttk.Frame(notebook)
+		tab_style = ttk.Style()
+		tab_style.configure("Custom.TFrame", background=BG_COLOR)
 
-		notebook.add(self.tab_employees, text="Employees")
-		notebook.add(self.tab_logs, text="Logs")
-		notebook.add(self.tab_summary, text="Summary")
+		self.tab_employees = ttk.Frame(notebook, style="Custom.TFrame")
+		self.tab_logs = ttk.Frame(notebook, style="Custom.TFrame")
+		self.tab_summary = ttk.Frame(notebook, style="Custom.TFrame")
+
+		notebook.add(self.tab_employees, text="  Employees  ")
+		notebook.add(self.tab_logs, text="  Logs  ")
+		notebook.add(self.tab_summary, text="  Summary  ")
 
 		self._build_employees_tab()
 		self._build_logs_tab()
@@ -70,17 +112,23 @@ class AdminPanel(tk.Toplevel):
 		self.tab_employees.columnconfigure(1, weight=2)
 		self.tab_employees.rowconfigure(1, weight=1)
 
-		toolbar = ttk.Frame(self.tab_employees)
-		toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=6)
-		ttk.Button(toolbar, text="Refresh", command=self.refresh_employees).pack(side="left")
-		ttk.Button(toolbar, text="Delete Employee", command=self._delete_selected_employee).pack(side="left", padx=6)
+		toolbar = tk.Frame(self.tab_employees, bg=BG_COLOR)
+		toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 10))
+		
+		btn_refresh = ModernButton(toolbar, text="Refresh", command=self.refresh_employees, width=100)
+		btn_refresh.pack(side="left", padx=(0, 8))
+		
+		btn_delete = DangerButton(toolbar, text="Delete Employee", command=self._delete_selected_employee, width=130)
+		btn_delete.pack(side="left", padx=8)
+		
 		reenroll_state = "normal" if callable(self.on_reenroll) else "disabled"
-		ttk.Button(toolbar, text="Re-enroll Face", command=self._reenroll_selected_employee, state=reenroll_state).pack(side="left")
+		btn_reenroll = PrimaryButton(toolbar, text="Re-enroll Face", command=self._reenroll_selected_employee, width=120)
+		btn_reenroll.pack(side="left")
+		if not callable(self.on_reenroll):
+			btn_reenroll.config(state="disabled")
 
-		left = ttk.Frame(self.tab_employees)
+		left = tk.Frame(self.tab_employees, bg=ModernStyles.CARD_BG)
 		left.grid(row=1, column=0, sticky="nsew", padx=(6, 4), pady=(0, 6))
-		left.rowconfigure(0, weight=1)
-		left.columnconfigure(0, weight=1)
 
 		cols = ("employee_id", "full_name", "department", "role_position")
 		self.employee_tree = ttk.Treeview(left, columns=cols, show="headings", selectmode="browse")
@@ -99,7 +147,7 @@ class AdminPanel(tk.Toplevel):
 		self.employee_tree.configure(yscrollcommand=yscroll.set)
 		yscroll.grid(row=0, column=1, sticky="ns")
 
-		right = ttk.Frame(self.tab_employees)
+		right = tk.Frame(self.tab_employees, bg=ModernStyles.CARD_BG)
 		right.grid(row=1, column=1, sticky="nsew", padx=(4, 6), pady=(0, 6))
 		right.columnconfigure(1, weight=1)
 		right.rowconfigure(13, weight=1)
@@ -127,21 +175,28 @@ class AdminPanel(tk.Toplevel):
 			("Schedule Time In", "schedule_time_in"),
 			("Schedule Time Out", "schedule_time_out"),
 		]
+		
 		for row, (label, key) in enumerate(fields):
-			ttk.Label(right, text=label).grid(row=row, column=0, sticky="w", pady=3)
-			ttk.Entry(right, textvariable=self._entry_vars[key]).grid(row=row, column=1, sticky="ew", pady=3)
+			tk.Label(right, text=label, bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+					font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", pady=3, padx=(10, 5))
+			entry = tk.Entry(right, textvariable=self._entry_vars[key], font=("Segoe UI", 10),
+							bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY, relief="flat")
+			entry.grid(row=row, column=1, sticky="ew", pady=3, padx=(0, 10))
 
-		ttk.Button(right, text="Update Employee", command=self._update_selected_employee).grid(
-			row=len(fields), column=0, columnspan=2, sticky="ew", pady=(6, 10)
-		)
+		btn_update = PrimaryButton(right, text="Update Employee", command=self._update_selected_employee, width=180)
+		btn_update.grid(row=len(fields), column=0, columnspan=2, sticky="ew", pady=(12, 10), padx=10)
 
-		ttk.Label(right, text="Saved Photos").grid(row=len(fields)+1, column=0, columnspan=2, sticky="w")
-		photo_frame = ttk.Frame(right)
+		tk.Label(right, text="Saved Photos", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 10, "bold")).grid(row=len(fields)+1, column=0, columnspan=2, sticky="w", padx=10)
+		
+		photo_frame = tk.Frame(right, bg=ModernStyles.CARD_BG)
 		photo_frame.grid(row=len(fields)+2, column=0, columnspan=2, sticky="nsew")
 		photo_frame.columnconfigure(0, weight=1)
 		photo_frame.rowconfigure(0, weight=1)
 
-		self.photo_list = tk.Listbox(photo_frame, height=8)
+		self.photo_list = tk.Listbox(photo_frame, height=8, font=("Segoe UI", 10),
+									bg="#ffffff", fg=ModernStyles.TEXT_PRIMARY,
+									relief="flat", selectbackground=ACCENT_COLOR, selectforeground="#ffffff")
 		self.photo_list.grid(row=0, column=0, sticky="nsew")
 		self.photo_list.bind("<<ListboxSelect>>", self._on_photo_selected)
 
@@ -149,21 +204,33 @@ class AdminPanel(tk.Toplevel):
 		self.photo_list.configure(yscrollcommand=photo_scroll.set)
 		photo_scroll.grid(row=0, column=1, sticky="ns")
 
-		self.photo_preview = ttk.Label(right, text="No photo selected", anchor="center")
-		self.photo_preview.grid(row=len(fields)+3, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+		self.photo_preview = tk.Label(right, text="No photo selected", anchor="center",
+									 bg=ModernStyles.FORM_BG, fg=ModernStyles.TEXT_SECONDARY,
+									 font=("Segoe UI", 9), relief="flat")
+		self.photo_preview.grid(row=len(fields)+3, column=0, columnspan=2, sticky="nsew", pady=(8, 0), padx=10)
 
 	def _build_logs_tab(self):
 		self.tab_logs.rowconfigure(1, weight=1)
 		self.tab_logs.columnconfigure(0, weight=1)
 
-		toolbar = ttk.Frame(self.tab_logs)
-		toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
-		ttk.Button(toolbar, text="Refresh Logs", command=self.refresh_logs).pack(side="left")
-		ttk.Button(toolbar, text="Edit Verification Logs", command=self._open_verification_editor).pack(side="left", padx=6)
-		ttk.Button(toolbar, text="Edit Error Logs", command=self._open_error_editor).pack(side="left", padx=6)
-		ttk.Button(toolbar, text="Edit Attendance Logs", command=self._open_attendance_editor).pack(side="left")
+		toolbar = tk.Frame(self.tab_logs, bg=BG_COLOR)
+		toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(0, 10))
+		
+		btn_refresh = ModernButton(toolbar, text="Refresh Logs", command=self.refresh_logs, width=120)
+		btn_refresh.pack(side="left", padx=(0, 8))
+		
+		btn_verif = SecondaryButton(toolbar, text="Edit Verification", command=self._open_verification_editor, width=150)
+		btn_verif.pack(side="left", padx=8)
+		
+		btn_error = SecondaryButton(toolbar, text="Edit Error Logs", command=self._open_error_editor, width=130)
+		btn_error.pack(side="left", padx=8)
+		
+		btn_attend = SecondaryButton(toolbar, text="Edit Attendance", command=self._open_attendance_editor, width=140)
+		btn_attend.pack(side="left")
 
-		self.log_text = tk.Text(self.tab_logs, wrap="word")
+		self.log_text = tk.Text(self.tab_logs, wrap="word", font=("Segoe UI", 10),
+							   bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+							   relief="flat", padx=10, pady=10)
 		self.log_text.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
 		self.log_text.config(state="disabled")
 
@@ -171,11 +238,15 @@ class AdminPanel(tk.Toplevel):
 		self.tab_summary.rowconfigure(1, weight=1)
 		self.tab_summary.columnconfigure(0, weight=1)
 
-		toolbar = ttk.Frame(self.tab_summary)
-		toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
-		ttk.Button(toolbar, text="Refresh Summary", command=self.refresh_summary).pack(side="left")
+		toolbar = tk.Frame(self.tab_summary, bg=BG_COLOR)
+		toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(0, 10))
+		
+		btn_refresh = ModernButton(toolbar, text="Refresh Summary", command=self.refresh_summary, width=140)
+		btn_refresh.pack(side="left")
 
-		self.summary_text = tk.Text(self.tab_summary, wrap="word")
+		self.summary_text = tk.Text(self.tab_summary, wrap="word", font=("Segoe UI", 10),
+								   bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+								   relief="flat", padx=10, pady=10)
 		self.summary_text.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
 		self.summary_text.config(state="disabled")
 
@@ -369,14 +440,21 @@ class AdminPanel(tk.Toplevel):
 		editor = tk.Toplevel(self)
 		editor.title("Edit Verification Logs")
 		editor.geometry("980x560")
+		editor.config(bg=BG_COLOR)
 
-		root = ttk.Frame(editor, padding=8)
+		root = tk.Frame(editor, bg=BG_COLOR, padx=10, pady=10)
 		root.pack(fill="both", expand=True)
 		root.columnconfigure(0, weight=1)
 		root.rowconfigure(1, weight=1)
 
-		toolbar = ttk.Frame(root)
-		toolbar.grid(row=0, column=0, sticky="ew")
+		toolbar = tk.Frame(root, bg=BG_COLOR)
+		toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+		
+		btn_reload = ModernButton(toolbar, text="Reload", command=lambda: load_rows(), width=100)
+		btn_reload.pack(side="left", padx=(0, 8))
+		
+		btn_save = PrimaryButton(toolbar, text="Save Edit", command=save, width=100)
+		btn_save.pack(side="left")
 
 		cols = ("id", "timestamp", "employee_id", "success", "score", "message")
 		tree = ttk.Treeview(root, columns=cols, show="headings", selectmode="browse")
@@ -388,10 +466,10 @@ class AdminPanel(tk.Toplevel):
 		tree.column("success", width=80, stretch=False)
 		tree.column("score", width=90, stretch=False)
 		tree.column("message", width=360)
-		tree.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+		tree.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
 
-		form = ttk.LabelFrame(root, text="Edit Selected Log", padding=8)
-		form.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+		form = tk.Frame(root, bg=ModernStyles.CARD_BG)
+		form.grid(row=2, column=0, sticky="ew", pady=(0, 0))
 		form.columnconfigure(1, weight=1)
 
 		employee_var = tk.StringVar()
@@ -400,36 +478,49 @@ class AdminPanel(tk.Toplevel):
 		message_var = tk.StringVar()
 		timestamp_var = tk.StringVar()
 
-		ttk.Label(form, text="Employee ID").grid(row=0, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=employee_var).grid(row=0, column=1, sticky="ew", padx=4, pady=2)
-		ttk.Label(form, text="Success (0/1)").grid(row=0, column=2, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=success_var, width=8).grid(row=0, column=3, sticky="w", padx=4, pady=2)
+		row = 0
+		tk.Label(form, text="Employee ID", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=employee_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+		tk.Label(form, text="Success (0/1)", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=2, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=success_var, width=8, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=3, sticky="w", padx=4, pady=2)
 
-		ttk.Label(form, text="Score").grid(row=1, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=score_var).grid(row=1, column=1, sticky="ew", padx=4, pady=2)
-		ttk.Label(form, text="Timestamp (ISO)").grid(row=1, column=2, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=timestamp_var).grid(row=1, column=3, sticky="ew", padx=4, pady=2)
+		row += 1
+		tk.Label(form, text="Score", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=score_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+		tk.Label(form, text="Timestamp (ISO)", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=2, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=timestamp_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=3, sticky="ew", padx=4, pady=2)
 
-		ttk.Label(form, text="Message").grid(row=2, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=message_var).grid(row=2, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
+		row += 1
+		tk.Label(form, text="Message", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=message_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
 
 		state = {"selected_id": None}
 
 		def load_rows():
 			for item in tree.get_children():
 				tree.delete(item)
-			for row in get_recent_verifications(limit=500):
+			for row_data in get_recent_verifications(limit=500):
 				tree.insert(
 					"",
 					"end",
-					iid=str(row["id"]),
+					iid=str(row_data["id"]),
 					values=(
-						row["id"],
-						row["timestamp"],
-						row["employee_id"] or "",
-						row["success"],
-						"" if row["score"] is None else row["score"],
-						row["message"],
+						row_data["id"],
+						row_data["timestamp"],
+						row_data["employee_id"] or "",
+						row_data["success"],
+						"" if row_data["score"] is None else row_data["score"],
+						row_data["message"],
 					),
 				)
 
@@ -482,8 +573,6 @@ class AdminPanel(tk.Toplevel):
 			load_rows()
 			self._set_status("Verification log updated.")
 
-		ttk.Button(toolbar, text="Reload", command=load_rows).pack(side="left")
-		ttk.Button(toolbar, text="Save Edit", command=save).pack(side="left", padx=6)
 		tree.bind("<<TreeviewSelect>>", on_select)
 		load_rows()
 
@@ -491,14 +580,21 @@ class AdminPanel(tk.Toplevel):
 		editor = tk.Toplevel(self)
 		editor.title("Edit Attendance Logs")
 		editor.geometry("980x560")
+		editor.config(bg=BG_COLOR)
 
-		root = ttk.Frame(editor, padding=8)
+		root = tk.Frame(editor, bg=BG_COLOR, padx=10, pady=10)
 		root.pack(fill="both", expand=True)
 		root.columnconfigure(0, weight=1)
 		root.rowconfigure(1, weight=1)
 
-		toolbar = ttk.Frame(root)
-		toolbar.grid(row=0, column=0, sticky="ew")
+		toolbar = tk.Frame(root, bg=BG_COLOR)
+		toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+		
+		btn_reload = ModernButton(toolbar, text="Reload", command=lambda: load_rows(), width=100)
+		btn_reload.pack(side="left", padx=(0, 8))
+		
+		btn_save = PrimaryButton(toolbar, text="Save Edit", command=save, width=100)
+		btn_save.pack(side="left")
 
 		cols = ("id", "timestamp", "employee_id", "action", "verified", "score")
 		tree = ttk.Treeview(root, columns=cols, show="headings", selectmode="browse")
@@ -510,10 +606,10 @@ class AdminPanel(tk.Toplevel):
 		tree.column("action", width=100, stretch=False)
 		tree.column("verified", width=80, stretch=False)
 		tree.column("score", width=90, stretch=False)
-		tree.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+		tree.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
 
-		form = ttk.LabelFrame(root, text="Edit Selected Log", padding=8)
-		form.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+		form = tk.Frame(root, bg=ModernStyles.CARD_BG)
+		form.grid(row=2, column=0, sticky="ew", pady=(0, 0))
 		form.columnconfigure(1, weight=1)
 
 		employee_var = tk.StringVar()
@@ -522,38 +618,49 @@ class AdminPanel(tk.Toplevel):
 		score_var = tk.StringVar()
 		timestamp_var = tk.StringVar()
 
-		ttk.Label(form, text="Employee ID").grid(row=0, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=employee_var).grid(row=0, column=1, sticky="ew", padx=4, pady=2)
-		ttk.Label(form, text="Action").grid(row=0, column=2, sticky="w", padx=4, pady=2)
-		ttk.Combobox(form, textvariable=action_var, values=["TIME_IN", "TIME_OUT"], state="readonly").grid(
-			row=0, column=3, sticky="ew", padx=4, pady=2
-		)
+		row = 0
+		tk.Label(form, text="Employee ID", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=employee_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+		tk.Label(form, text="Action", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=2, sticky="w", padx=4, pady=2)
+		ttk.Combobox(form, textvariable=action_var, values=["TIME_IN", "TIME_OUT"], state="readonly",
+				   font=("Segoe UI", 10)).grid(row=row, column=3, sticky="ew", padx=4, pady=2)
 
-		ttk.Label(form, text="Verified (0/1)").grid(row=1, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=verified_var).grid(row=1, column=1, sticky="ew", padx=4, pady=2)
-		ttk.Label(form, text="Score").grid(row=1, column=2, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=score_var).grid(row=1, column=3, sticky="ew", padx=4, pady=2)
+		row += 1
+		tk.Label(form, text="Verified (0/1)", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=verified_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+		tk.Label(form, text="Score", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=2, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=score_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=3, sticky="ew", padx=4, pady=2)
 
-		ttk.Label(form, text="Timestamp (ISO)").grid(row=2, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=timestamp_var).grid(row=2, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
+		row += 1
+		tk.Label(form, text="Timestamp (ISO)", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=timestamp_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
 
 		state = {"selected_id": None}
 
 		def load_rows():
 			for item in tree.get_children():
 				tree.delete(item)
-			for row in get_recent_attendance(limit=500):
+			for row_data in get_recent_attendance(limit=500):
 				tree.insert(
 					"",
 					"end",
-					iid=str(row["id"]),
+					iid=str(row_data["id"]),
 					values=(
-						row["id"],
-						row["timestamp"],
-						row["employee_id"],
-						row["action"],
-						row["verified"],
-						"" if row["score"] is None else row["score"],
+						row_data["id"],
+						row_data["timestamp"],
+						row_data["employee_id"],
+						row_data["action"],
+						row_data["verified"],
+						"" if row_data["score"] is None else row_data["score"],
 					),
 				)
 
@@ -606,8 +713,6 @@ class AdminPanel(tk.Toplevel):
 			load_rows()
 			self._set_status("Attendance log updated.")
 
-		ttk.Button(toolbar, text="Reload", command=load_rows).pack(side="left")
-		ttk.Button(toolbar, text="Save Edit", command=save).pack(side="left", padx=6)
 		tree.bind("<<TreeviewSelect>>", on_select)
 		load_rows()
 
@@ -615,14 +720,21 @@ class AdminPanel(tk.Toplevel):
 		editor = tk.Toplevel(self)
 		editor.title("Edit Error Logs")
 		editor.geometry("980x560")
+		editor.config(bg=BG_COLOR)
 
-		root = ttk.Frame(editor, padding=8)
+		root = tk.Frame(editor, bg=BG_COLOR, padx=10, pady=10)
 		root.pack(fill="both", expand=True)
 		root.columnconfigure(0, weight=1)
 		root.rowconfigure(1, weight=1)
 
-		toolbar = ttk.Frame(root)
-		toolbar.grid(row=0, column=0, sticky="ew")
+		toolbar = tk.Frame(root, bg=BG_COLOR)
+		toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+		
+		btn_reload = ModernButton(toolbar, text="Reload", command=lambda: load_rows(), width=100)
+		btn_reload.pack(side="left", padx=(0, 8))
+		
+		btn_save = PrimaryButton(toolbar, text="Save Edit", command=save, width=100)
+		btn_save.pack(side="left")
 
 		cols = ("id", "timestamp", "employee_id", "score", "message")
 		tree = ttk.Treeview(root, columns=cols, show="headings", selectmode="browse")
@@ -633,10 +745,10 @@ class AdminPanel(tk.Toplevel):
 		tree.column("employee_id", width=120, stretch=False)
 		tree.column("score", width=90, stretch=False)
 		tree.column("message", width=420)
-		tree.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+		tree.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
 
-		form = ttk.LabelFrame(root, text="Edit Selected Log", padding=8)
-		form.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+		form = tk.Frame(root, bg=ModernStyles.CARD_BG)
+		form.grid(row=2, column=0, sticky="ew", pady=(0, 0))
 		form.columnconfigure(1, weight=1)
 
 		employee_var = tk.StringVar()
@@ -644,33 +756,44 @@ class AdminPanel(tk.Toplevel):
 		message_var = tk.StringVar()
 		timestamp_var = tk.StringVar()
 
-		ttk.Label(form, text="Employee ID").grid(row=0, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=employee_var).grid(row=0, column=1, sticky="ew", padx=4, pady=2)
-		ttk.Label(form, text="Score").grid(row=0, column=2, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=score_var).grid(row=0, column=3, sticky="ew", padx=4, pady=2)
+		row = 0
+		tk.Label(form, text="Employee ID", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=employee_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+		tk.Label(form, text="Score", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=2, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=score_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=3, sticky="ew", padx=4, pady=2)
 
-		ttk.Label(form, text="Timestamp (ISO)").grid(row=1, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=timestamp_var).grid(row=1, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
+		row += 1
+		tk.Label(form, text="Timestamp (ISO)", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=timestamp_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
 
-		ttk.Label(form, text="Message").grid(row=2, column=0, sticky="w", padx=4, pady=2)
-		ttk.Entry(form, textvariable=message_var).grid(row=2, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
+		row += 1
+		tk.Label(form, text="Message", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY,
+				font=("Segoe UI", 9)).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+		tk.Entry(form, textvariable=message_var, font=("Segoe UI", 10), bg="#ffffff",
+				fg=ModernStyles.TEXT_PRIMARY, relief="flat").grid(row=row, column=1, columnspan=3, sticky="ew", padx=4, pady=2)
 
 		state = {"selected_id": None}
 
 		def load_rows():
 			for item in tree.get_children():
 				tree.delete(item)
-			for row in get_recent_errors(limit=500):
+			for row_data in get_recent_errors(limit=500):
 				tree.insert(
 					"",
 					"end",
-					iid=str(row["id"]),
+					iid=str(row_data["id"]),
 					values=(
-						row["id"],
-						row["timestamp"],
-						row["employee_id"] or "",
-						"" if row["score"] is None else row["score"],
-						row["message"],
+						row_data["id"],
+						row_data["timestamp"],
+						row_data["employee_id"] or "",
+						"" if row_data["score"] is None else row_data["score"],
+						row_data["message"],
 					),
 				)
 
@@ -716,7 +839,5 @@ class AdminPanel(tk.Toplevel):
 			load_rows()
 			self._set_status("Error log updated.")
 
-		ttk.Button(toolbar, text="Reload", command=load_rows).pack(side="left")
-		ttk.Button(toolbar, text="Save Edit", command=save).pack(side="left", padx=6)
 		tree.bind("<<TreeviewSelect>>", on_select)
 		load_rows()

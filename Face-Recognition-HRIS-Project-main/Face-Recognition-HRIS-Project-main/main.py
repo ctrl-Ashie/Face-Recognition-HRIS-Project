@@ -20,6 +20,16 @@ from face_service import (
     save_face_sample,
     verify_claimed_employee,
 )
+from modern_ui import (
+    ModernStyles,
+    ModernButton,
+    PrimaryButton,
+    SecondaryButton,
+    ModernCard,
+    ModernLabel,
+    ModernEntry,
+    create_gradient_header,
+)
 from storage import (
     add_employee,
     can_log_action,
@@ -33,10 +43,13 @@ from storage import (
     log_verification,
 )
 
-BG_COLOR = "light gray"
+BG_COLOR = "#eef2f7"
 HEADER_COLOR = "#010066"
+HEADER_DARK = "#00004d"
 ACCENT_COLOR = "#caab2f"
-FORM_BG = "#e1e1e1"
+ACCENT_HOVER = "#b89a28"
+FORM_BG = "#ffffff"
+CARD_SHADOW = "#d1d8e3"
 LOGO_PATH = "BCLogo.png"
 
 EMPLOYEE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,19}$")
@@ -47,17 +60,19 @@ class HRISApp:
     """Primary employee-facing app (auth, camera verification, attendance, and employee-scoped logs)."""
 
     def __init__(self):
-        # Load optional .env settings for storage backend and admin credentials.
         load_dotenv()
         init_db()
 
         self.window = tk.Tk()
-        self.window.title("Face Recognition HRIS")
-        self.window.minsize(1120, 700)
+        self.window.title("Bank of Commerce - Facial Authentication")
+        self.window.geometry("800x620")
+        self.window.minsize(700, 550)
         self.window.config(bg=BG_COLOR)
+        
+        self._setup_window_style()
 
         self.logo_img = None
-        self.status_text = tk.StringVar(value="Welcome. Start from Employee Login / Signup.")
+        self.status_text = tk.StringVar(value="Welcome to Bank of Commerce - Employee Facial Authentication System")
 
         self.logged_in_employee_id = None
         self.pending_attendance_action = None
@@ -76,50 +91,98 @@ class HRISApp:
         self._setup_camera()
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _build_ui(self):
-        # Global shell: header, navigation, section container, and status bar.
-        header = tk.Frame(self.window, bg=HEADER_COLOR, padx=10, pady=8)
-        header.pack(side="top", fill="x")
+    def _setup_window_style(self):
+        try:
+            self.window.tk.call("tk", "scaling", 1.2)
+        except:
+            pass
 
+    def _create_header(self, parent):
+        header = tk.Frame(parent, bg=HEADER_COLOR, height=70)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        
+        header_canvas = tk.Canvas(header, bg=HEADER_COLOR, highlightthickness=0, height=70)
+        header_canvas.pack(fill="x")
+        header_canvas.update_idletasks()
+        
+        w = header_canvas.winfo_width()
+        if w < 100:
+            w = 1120
+        
+        for i in range(70):
+            ratio = i / 70
+            r = int(1 + (0 - 1) * ratio)
+            g = int(0 + (0 - 0) * ratio)
+            b = int(102 + (77 - 102) * ratio)
+            color = f"#{r:02x}{g:02x}{b:02x}"
+            header_canvas.create_rectangle(0, i, w, i+1, fill=color, outline="")
+        
         logo = self._get_logo()
         if logo is not None:
-            tk.Label(header, image=logo, bg=HEADER_COLOR).pack(side="left")
-
-        tk.Label(
-            header,
-            text="Face Recognition HRIS",
-            bg=HEADER_COLOR,
-            fg="white",
-            font=("Times New Roman", 20, "bold"),
-        ).pack(side="left", padx=10)
-
+            header_canvas.create_image(20, 15, image=logo, anchor="nw")
+        
+        header_canvas.create_text(80, 22, text="BANK OF COMMERCE", fill="#ffffff", 
+                                  font=("Segoe UI", 18, "bold"), anchor="w")
+        header_canvas.create_text(80, 45, text="Employee Facial Authentication System", fill="#caab2f", 
+                                  font=("Segoe UI", 11), anchor="w")
+        
+        self.session_badge = tk.Frame(header, bg="#c9302c", padx=12, pady=4)
+        self.session_badge.place(relx=1.0, rely=0.5, anchor="e", x=-20)
+        
         self.session_label = tk.Label(
-            header,
-            text="Employee Session: Not Logged In",
-            bg=HEADER_COLOR,
-            fg="white",
-            font=("Arial", 10, "bold"),
+            self.session_badge,
+            text="NOT LOGGED IN",
+            bg="#c9302c",
+            fg="#ffffff",
+            font=("Segoe UI", 9, "bold"),
         )
-        self.session_label.pack(side="right")
+        self.session_label.pack()
+        
+        return header
 
-        nav = tk.Frame(self.window, bg=BG_COLOR)
-        nav.pack(fill="x", padx=10, pady=(8, 0))
+    def _build_ui(self):
+        main_container = tk.Frame(self.window, bg=BG_COLOR)
+        main_container.pack(fill="both", expand=True)
 
-        self.section_buttons = {
-            "auth": tk.Button(nav, text="Employee Login / Signup", command=lambda: self._show_section("auth"), bg=ACCENT_COLOR),
-            "biometric": tk.Button(nav, text="Biometric Workspace", command=lambda: self._show_section("biometric"), state="disabled"),
-            "logs": tk.Button(nav, text="Employee Logs", command=lambda: self._show_section("logs"), state="disabled"),
-        }
+        header = tk.Frame(main_container, bg=HEADER_COLOR)
+        header.pack(fill="x")
+        self._create_header(header)
 
-        self.section_buttons["auth"].pack(side="left", padx=(0, 6), pady=4)
-        self.section_buttons["biometric"].pack(side="left", padx=6, pady=4)
-        self.section_buttons["logs"].pack(side="left", padx=6, pady=4)
+        nav = tk.Frame(main_container, bg=BG_COLOR)
+        nav.pack(fill="x", padx=15, pady=(12, 8))
 
-        self.logout_btn = tk.Button(nav, text="Logout Employee", command=self._logout_employee, state="disabled")
-        self.logout_btn.pack(side="right", padx=4)
+        nav_bg = tk.Frame(nav, bg=FORM_BG, relief="solid", borderwidth=1, border=1)
+        nav_bg.pack(side="left")
 
-        self.section_container = tk.Frame(self.window, bg=BG_COLOR)
-        self.section_container.pack(fill="both", expand=True, padx=10, pady=10)
+        self.section_buttons = {}
+        btn_configs = [
+            ("auth", "Employee Login / Signup"),
+            ("biometric", "Biometric Workspace"),
+            ("logs", "Employee Logs"),
+        ]
+        
+        for i, (key, text) in enumerate(btn_configs):
+            btn = self._create_nav_button(nav_bg, text, lambda k=key: self._show_section(k))
+            btn.pack(side="left", padx=0, pady=0)
+            self.section_buttons[key] = btn
+            if key != "auth":
+                btn.config(state="disabled")
+            
+            if i < len(btn_configs) - 1:
+                sep = tk.Frame(nav_bg, bg="#d1d5db", width=1, height=35)
+                sep.pack(side="left", fill="y", pady=5)
+
+        logout_frame = tk.Frame(nav, bg=BG_COLOR)
+        logout_frame.pack(side="right")
+        
+        self.logout_btn = self._create_action_button(
+            logout_frame, "Logout", self._logout_employee, "#6c757d", "#ffffff"
+        )
+        self.logout_btn.config(state="disabled")
+
+        self.section_container = tk.Frame(main_container, bg=BG_COLOR)
+        self.section_container.pack(fill="both", expand=True, padx=15, pady=(0, 10))
 
         self.section_frames = {
             "auth": tk.Frame(self.section_container, bg=BG_COLOR),
@@ -133,42 +196,131 @@ class HRISApp:
 
         self._show_section("auth")
 
-        status_bar = tk.Label(
-            self.window,
+        status_bar = tk.Frame(self.window, bg=HEADER_COLOR, padx=15, pady=10)
+        status_bar.pack(side="bottom", fill="x")
+        
+        status_icon = tk.Label(status_bar, text="●", bg=HEADER_COLOR, fg="#caab2f", font=("Segoe UI", 8))
+        status_icon.pack(side="left", padx=(0, 5))
+        
+        status_label = tk.Label(
+            status_bar,
             textvariable=self.status_text,
             anchor="w",
             bg=HEADER_COLOR,
-            fg="white",
-            padx=10,
-            pady=6,
+            fg="#ffffff",
+            font=("Segoe UI", 10),
         )
-        status_bar.pack(side="bottom", fill="x")
+        status_label.pack(side="left")
+
+    def _create_nav_button(self, parent, text, command):
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=("Segoe UI", 10, "bold"),
+            bg="#f8f9fa",
+            fg=HEADER_COLOR,
+            activebackground=ACCENT_COLOR,
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            borderwidth=0,
+        )
+        btn.bind("<Enter>", lambda e: btn.config(bg=ACCENT_COLOR, fg="#ffffff"))
+        btn.bind("<Leave>", lambda e: btn.config(bg="#f8f9fa", fg=HEADER_COLOR))
+        return btn
+
+    def _create_action_button(self, parent, text, command, bg_color, fg_color):
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=("Segoe UI", 10, "bold"),
+            bg=bg_color,
+            fg=fg_color,
+            activebackground="#5a6268",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=20,
+            pady=8,
+            cursor="hand2",
+            borderwidth=0,
+        )
+        btn.bind("<Enter>", lambda e: btn.config(bg=ACCENT_COLOR))
+        btn.bind("<Leave>", lambda e: btn.config(bg=bg_color))
+        return btn
+
+    def _build_section_header(self, parent, icon, title, subtitle):
+        header = tk.Frame(parent, bg=FORM_BG)
+        header.pack(fill="x", pady=(0, 15))
+        
+        icon_label = tk.Label(header, text=icon, bg=FORM_BG, fg=ACCENT_COLOR, 
+                             font=("Segoe UI", 24), width=3)
+        icon_label.pack(side="left", padx=(0, 15))
+        
+        text_frame = tk.Frame(header, bg=FORM_BG)
+        text_frame.pack(side="left", fill="x")
+        
+        title_label = tk.Label(text_frame, text=title, bg=FORM_BG, fg=HEADER_COLOR, 
+                              font=("Segoe UI", 20, "bold"), anchor="w")
+        title_label.pack(fill="x")
+        
+        subtitle_label = tk.Label(text_frame, text=subtitle, bg=FORM_BG, 
+                                 fg="#6c757d", font=("Segoe UI", 11), anchor="w")
+        subtitle_label.pack(fill="x")
+        
+        return header
+
+    def _build_card(self, parent, title, icon="▸"):
+        card = tk.Frame(parent, bg=FORM_BG, relief="solid", borderwidth=1, border=1)
+        card.pack(fill="x", pady=(0, 15))
+        
+        card_header = tk.Frame(card, bg=HEADER_COLOR)
+        card_header.pack(fill="x")
+        
+        tk.Label(card_header, text=f"{icon}  {title}", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 12, "bold"), padx=15, pady=8, anchor="w").pack(fill="x")
+        
+        card_content = tk.Frame(card, bg=FORM_BG)
+        card_content.pack(fill="x", padx=15, pady=15)
+        
+        return card, card_content
 
     def _build_auth_section(self, parent):
-        # Account access section: employee login and employee signup.
-        panel = tk.Frame(parent, bg=FORM_BG, relief="solid", borderwidth=1, padx=14, pady=14)
-        panel.pack(fill="both", expand=True)
+        main_card = tk.Frame(parent, bg=FORM_BG, relief="solid", borderwidth=1)
+        main_card.pack(fill="both", expand=True)
+        
+        main_header = tk.Frame(main_card, bg=HEADER_COLOR, padx=15, pady=10)
+        main_header.pack(fill="x")
+        
+        tk.Label(main_header, text="👤  EMPLOYEE ACCOUNT", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 13, "bold")).pack(side="left")
+        
+        content = tk.Frame(main_card, bg=FORM_BG, padx=15, pady=12)
+        content.pack(fill="both", expand=True)
 
-        tk.Label(panel, text="Employee Account Access", bg=FORM_BG, fg=HEADER_COLOR, font=("Arial", 16, "bold")).pack(anchor="w")
-        tk.Label(
-            panel,
-            text="Step 1: Login or create account. Step 2: Proceed to biometric enrollment/verification.",
-            bg=FORM_BG,
-            fg="#333333",
-        ).pack(anchor="w", pady=(4, 12))
+        login_card = tk.Frame(content, bg=FORM_BG, relief="solid", borderwidth=1)
+        login_card.pack(fill="x", pady=(0, 10))
+        login_header = tk.Frame(login_card, bg=HEADER_COLOR, padx=10, pady=5)
+        login_header.pack(fill="x")
+        tk.Label(login_header, text="🔑  Login to Your Account", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        login_content = tk.Frame(login_card, bg=FORM_BG, padx=12, pady=10)
+        login_content.pack(fill="x")
 
-        login_box = tk.LabelFrame(panel, text="Login", bg=FORM_BG, padx=10, pady=10)
-        login_box.pack(fill="x", pady=(0, 12))
-
-        login_row = tk.Frame(login_box, bg=FORM_BG)
-        login_row.pack(fill="x")
-        tk.Label(login_row, text="Employee ID", bg=FORM_BG, width=14, anchor="w").pack(side="left")
         self.login_id_var = tk.StringVar()
-        tk.Entry(login_row, textvariable=self.login_id_var).pack(side="left", fill="x", expand=True)
-        tk.Button(login_row, text="Login", bg=ACCENT_COLOR, command=self._login_employee).pack(side="left", padx=(8, 0))
+        self._build_form_field(login_content, "Employee ID", self.login_id_var)
 
-        signup_box = tk.LabelFrame(panel, text="Signup", bg=FORM_BG, padx=10, pady=10)
-        signup_box.pack(fill="x")
+        signup_card = tk.Frame(content, bg=FORM_BG, relief="solid", borderwidth=1)
+        signup_card.pack(fill="x")
+        signup_header = tk.Frame(signup_card, bg=HEADER_COLOR, padx=10, pady=5)
+        signup_header.pack(fill="x")
+        tk.Label(signup_header, text="📝  Create New Account", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        signup_content = tk.Frame(signup_card, bg=FORM_BG, padx=12, pady=10)
+        signup_content.pack(fill="x")
 
         self.signup_vars = {
             "employee_id": tk.StringVar(),
@@ -179,102 +331,215 @@ class HRISApp:
             "email": tk.StringVar(),
         }
 
-        self._build_form_field(signup_box, "Employee ID", self.signup_vars["employee_id"])
-        self._build_form_field(signup_box, "Full Name", self.signup_vars["full_name"])
-        self._build_form_field(signup_box, "Department", self.signup_vars["department"])
-        self._build_form_field(signup_box, "Role / Position", self.signup_vars["role_position"])
-        self._build_form_field(signup_box, "Contact Number", self.signup_vars["contact_number"])
-        self._build_form_field(signup_box, "Email", self.signup_vars["email"])
+        fields_frame = tk.Frame(signup_content, bg=FORM_BG)
+        fields_frame.pack(fill="x")
 
-        tk.Button(signup_box, text="Create Account", bg=ACCENT_COLOR, command=self._signup_employee).pack(fill="x", pady=(8, 0))
+        left_col = tk.Frame(fields_frame, bg=FORM_BG)
+        left_col.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        
+        right_col = tk.Frame(fields_frame, bg=FORM_BG)
+        right_col.pack(side="left", fill="both", expand=True)
+
+        self._build_form_field(left_col, "Employee ID", self.signup_vars["employee_id"])
+        self._build_form_field(left_col, "Full Name", self.signup_vars["full_name"])
+        self._build_form_field(left_col, "Department", self.signup_vars["department"])
+        self._build_form_field(right_col, "Role / Position", self.signup_vars["role_position"])
+        self._build_form_field(right_col, "Contact Number", self.signup_vars["contact_number"])
+        self._build_form_field(right_col, "Email", self.signup_vars["email"])
+
+        btn_row = tk.Frame(content, bg=FORM_BG)
+        btn_row.pack(fill="x", pady=(12, 0))
+        
+        self._create_primary_button(btn_row, "Login", self._login_employee, 120).pack(side="left", padx=(0, 8))
+        self._create_primary_button(btn_row, "Create Account", self._signup_employee, 140).pack(side="left")
+
+    def _build_form_field(self, parent, label, var):
+        row = tk.Frame(parent, bg=FORM_BG)
+        row.pack(fill="x", pady=2)
+        
+        tk.Label(row, text=label, bg=FORM_BG, fg=HEADER_COLOR,
+                font=("Segoe UI", 9, "bold"), anchor="w").pack(anchor="w", pady=(0, 2))
+        
+        entry = tk.Entry(
+            row, textvariable=var,
+            font=("Segoe UI", 11), bg="#f8f9fa", fg=HEADER_COLOR,
+            relief="solid", highlightthickness=1,
+            highlightcolor=ACCENT_COLOR, highlightbackground="#d1d5db",
+            insertbackground=HEADER_COLOR, bd=2
+        )
+        entry.pack(fill="x", ipady=5)
+
+    def _create_primary_button(self, parent, text, command, width=None):
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            font=("Segoe UI", 11, "bold"),
+            bg=ACCENT_COLOR,
+            fg="#ffffff",
+            activebackground=ACCENT_HOVER,
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=25,
+            pady=8,
+            cursor="hand2",
+            borderwidth=0,
+        )
+        if width:
+            btn.config(width=width)
+        btn.bind("<Enter>", lambda e: btn.config(bg=ACCENT_HOVER))
+        btn.bind("<Leave>", lambda e: btn.config(bg=ACCENT_COLOR))
+        return btn
 
     def _build_biometric_section(self, parent):
-        # Camera workspace for enrollment and attendance verification workflows.
         left = tk.Frame(parent, bg=BG_COLOR)
         left.pack(side="left", fill="both", expand=True)
 
-        right = tk.Frame(parent, bg=FORM_BG, relief="solid", borderwidth=1)
-        right.pack(side="right", fill="y", padx=(10, 0))
+        right = tk.Frame(parent, bg=BG_COLOR)
+        right.pack(side="right", fill="y", padx=(15, 0))
 
-        self.cam_label = tk.Label(left, bg="black")
-        self.cam_label.pack(fill="both", expand=True)
+        cam_container = tk.Frame(left, bg="#1a1a2e", relief="solid", borderwidth=1)
+        cam_container.pack(fill="both", expand=True, pady=(0, 15))
+        
+        self.cam_label = tk.Label(cam_container, bg="#1a1a2e", relief="flat")
+        self.cam_label.pack(fill="both", expand=True, padx=0, pady=0)
 
+        profile_card = tk.Frame(left, bg=FORM_BG, relief="solid", borderwidth=1)
+        profile_card.pack(fill="x", pady=(0, 0))
+        
+        profile_header = tk.Frame(profile_card, bg=HEADER_COLOR, padx=12, pady=6)
+        profile_header.pack(fill="x")
+        tk.Label(profile_header, text="👤  SESSION PROFILE", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        
         self.profile_label = tk.Label(
-            left,
-            text="No employee session",
-            font=("Arial", 11, "bold"),
+            profile_card,
+            text="No employee session active",
+            font=("Segoe UI", 11),
             bg=FORM_BG,
-            fg="black",
+            fg="#6c757d",
             justify="left",
             anchor="nw",
-            padx=8,
-            pady=8,
-            height=7,
+            padx=15,
+            pady=12,
         )
-        self.profile_label.pack(fill="x", pady=(8, 0))
+        self.profile_label.pack(fill="x")
 
-        tk.Label(right, text="Biometric Enrollment", bg=FORM_BG, font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=(8, 4))
-        tk.Label(
-            right,
-            text="Use this for initial enrollment or re-enrollment.",
-            bg=FORM_BG,
-            fg="#333333",
-            wraplength=260,
-            justify="left",
-        ).pack(anchor="w", padx=10)
-        tk.Button(right, text="Start Face Enrollment", bg=ACCENT_COLOR, command=self.start_enrollment).pack(fill="x", padx=10, pady=(8, 10))
+        enrollment_card = tk.Frame(right, bg=FORM_BG, relief="solid", borderwidth=1)
+        enrollment_card.pack(fill="x", pady=(0, 15))
+        
+        enrollment_header = tk.Frame(enrollment_card, bg=HEADER_COLOR, padx=12, pady=6)
+        enrollment_header.pack(fill="x")
+        tk.Label(enrollment_header, text="📸  BIOMETRIC ENROLLMENT", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        
+        enrollment_content = tk.Frame(enrollment_card, bg=FORM_BG, padx=15, pady=12)
+        enrollment_content.pack(fill="x")
+        
+        tk.Label(enrollment_content, text="Use this for initial enrollment or re-enrollment of your facial data.",
+                bg=FORM_BG, fg="#6c757d", font=("Segoe UI", 10), wraplength=260,
+                justify="left").pack(anchor="w", pady=(0, 12))
+        
+        enroll_btn = self._create_primary_button(enrollment_content, "Start Face Enrollment", 
+                                                 self.start_enrollment, 200)
+        enroll_btn.pack(fill="x")
 
-        tk.Label(right, text="Attendance (Verification Required Each Action)", bg=FORM_BG, font=("Arial", 12, "bold")).pack(
-            anchor="w", padx=10, pady=(8, 4)
-        )
-        tk.Button(
-            right,
-            text="Verify and Time In",
-            bg=ACCENT_COLOR,
-            command=lambda: self.start_verification_for_action("TIME_IN"),
-        ).pack(fill="x", padx=10, pady=(4, 6))
-        tk.Button(
-            right,
-            text="Verify and Time Out",
-            bg=ACCENT_COLOR,
-            command=lambda: self.start_verification_for_action("TIME_OUT"),
-        ).pack(fill="x", padx=10, pady=(0, 10))
+        attendance_card = tk.Frame(right, bg=FORM_BG, relief="solid", borderwidth=1)
+        attendance_card.pack(fill="x", pady=(0, 15))
+        
+        attendance_header = tk.Frame(attendance_card, bg=HEADER_COLOR, padx=12, pady=6)
+        attendance_header.pack(fill="x")
+        tk.Label(attendance_header, text="⏱️  ATTENDANCE VERIFICATION", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        
+        attendance_content = tk.Frame(attendance_card, bg=FORM_BG, padx=15, pady=12)
+        attendance_content.pack(fill="x")
+        
+        tk.Label(attendance_content, text="Verify your identity for each attendance action.",
+                bg=FORM_BG, fg="#6c757d", font=("Segoe UI", 10),
+                justify="left").pack(anchor="w", pady=(0, 12))
+        
+        self._create_primary_button(attendance_content, "Verify and Time In",
+            lambda: self.start_verification_for_action("TIME_IN"), 200).pack(fill="x", pady=(0, 8))
+        
+        self._create_primary_button(attendance_content, "Verify and Time Out",
+            lambda: self.start_verification_for_action("TIME_OUT"), 200).pack(fill="x")
 
-        self.mode_label = tk.Label(right, text="Mode: Idle", bg=FORM_BG, fg=HEADER_COLOR, font=("Arial", 10, "bold"))
-        self.mode_label.pack(fill="x", padx=10, pady=(0, 6))
+        status_card = tk.Frame(right, bg=FORM_BG, relief="solid", borderwidth=1)
+        status_card.pack(fill="x", pady=(15, 0))
+        
+        status_header = tk.Frame(status_card, bg="#6c757d", padx=12, pady=6)
+        status_header.pack(fill="x")
+        tk.Label(status_header, text="📊  CAPTURE STATUS", bg="#6c757d", fg="#ffffff",
+                font=("Segoe UI", 10, "bold")).pack(side="left")
+        
+        status_content = tk.Frame(status_card, bg=FORM_BG, padx=15, pady=12)
+        status_content.pack(fill="x")
+        
+        self.mode_label = tk.Label(status_content, text="Mode: Idle", bg=FORM_BG, 
+                                   fg=HEADER_COLOR, font=("Segoe UI", 11, "bold"))
+        self.mode_label.pack(anchor="w", pady=(0, 8))
 
-        self.capture_label = tk.Label(right, text=f"Captured: 0/{MAX_SAMPLES}", bg=FORM_BG, fg="black")
-        self.capture_label.pack(fill="x", padx=10, pady=(0, 8))
+        self.capture_label = tk.Label(status_content, text=f"Captured: 0/{MAX_SAMPLES}", 
+                                       bg=FORM_BG, fg="#6c757d", font=("Segoe UI", 10))
+        self.capture_label.pack(anchor="w")
 
     def _build_logs_section(self, parent):
-        # Employee-only log views and summary analytics.
-        panel = tk.Frame(parent, bg=FORM_BG, relief="solid", borderwidth=1, padx=14, pady=14)
-        panel.pack(fill="both", expand=True)
+        main_card = tk.Frame(parent, bg=FORM_BG, relief="solid", borderwidth=1)
+        main_card.pack(fill="both", expand=True)
+        
+        main_header = tk.Frame(main_card, bg=HEADER_COLOR, padx=15, pady=10)
+        main_header.pack(fill="x")
+        
+        tk.Label(main_header, text="📋  EMPLOYEE ATTENDANCE LOGS", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 13, "bold")).pack(side="left")
+        
+        content = tk.Frame(main_card, bg=FORM_BG, padx=15, pady=15)
+        content.pack(fill="both", expand=True)
 
-        tk.Label(panel, text="Employee Logs", bg=FORM_BG, fg=HEADER_COLOR, font=("Arial", 16, "bold")).pack(anchor="w")
         self.logs_scope_label = tk.Label(
-            panel,
-            text="Available only when employee is logged in.",
+            content,
+            text="Your attendance records and statistics",
             bg=FORM_BG,
-            fg="#333333",
+            fg="#6c757d",
+            font=("Segoe UI", 11),
+            anchor="w",
         )
-        self.logs_scope_label.pack(anchor="w", pady=(4, 12))
+        self.logs_scope_label.pack(anchor="w", pady=(0, 15))
 
-        action_row = tk.Frame(panel, bg=FORM_BG)
-        action_row.pack(fill="x", pady=(6, 8))
-        tk.Button(action_row, text="User Logs", bg=ACCENT_COLOR, command=self.user_logs_clicked).pack(side="left", padx=(0, 8))
-        tk.Button(action_row, text="Log Error", bg=ACCENT_COLOR, command=self.log_error_clicked).pack(side="left", padx=8)
-        tk.Button(action_row, text="Log Summary", bg=ACCENT_COLOR, command=self.log_summary_clicked).pack(side="left", padx=8)
+        btn_frame = tk.Frame(content, bg=FORM_BG)
+        btn_frame.pack(fill="x", pady=(0, 15))
 
-    def _build_form_field(self, parent, label, var):
-        # Wraps labels alongside text string entry variables enforcing padding constraints.
-        row = tk.Frame(parent, bg=FORM_BG)
-        row.pack(fill="x", pady=2)
-        tk.Label(row, text=label, bg=FORM_BG, width=15, anchor="w").pack(side="left")
-        tk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
+        btn_style = {
+            "font": ("Segoe UI", 10, "bold"),
+            "relief": "flat",
+            "cursor": "hand2",
+            "pady": 10,
+        }
+
+        btn1 = tk.Button(btn_frame, text="📄  View User Logs", command=self.user_logs_clicked,
+                        bg="#007bff", fg="#ffffff", **btn_style)
+        btn1.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        btn1.bind("<Enter>", lambda e: btn1.config(bg="#0056b3"))
+        btn1.bind("<Leave>", lambda e: btn1.config(bg="#007bff"))
+
+        btn2 = tk.Button(btn_frame, text="⚠️  Error Logs", command=self.log_error_clicked,
+                        bg="#dc3545", fg="#ffffff", **btn_style)
+        btn2.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        btn2.bind("<Enter>", lambda e: btn2.config(bg="#c82333"))
+        btn2.bind("<Leave>", lambda e: btn2.config(bg="#dc3545"))
+
+        btn3 = tk.Button(btn_frame, text="📊  Attendance Summary", command=self.log_summary_clicked,
+                        bg="#28a745", fg="#ffffff", **btn_style)
+        btn3.pack(side="left", fill="x", expand=True)
+        btn3.bind("<Enter>", lambda e: btn3.config(bg="#218838"))
+        btn3.bind("<Leave>", lambda e: btn3.config(bg="#28a745"))
+        
+        info_label = tk.Label(content, text="ℹ️ View your attendance history, errors, and statistical graphs here.",
+                             bg=FORM_BG, fg="#6c757d", font=("Segoe UI", 10))
+        info_label.pack(anchor="w", pady=(20, 0))
 
     def _show_section(self, section):
-        """Displays designated UI segments selectively masking hidden panels simulating app navigation."""
         if section in {"biometric", "logs"} and not self.logged_in_employee_id:
             messagebox.showwarning("Employee Session", "Login first to access this section.")
             section = "auth"
@@ -282,10 +547,12 @@ class HRISApp:
         for key, frame in self.section_frames.items():
             if key == section:
                 frame.pack(fill="both", expand=True)
-                self.section_buttons[key].config(bg=ACCENT_COLOR)
+                if key in self.section_buttons:
+                    self.section_buttons[key].config(bg=ACCENT_COLOR, fg="#ffffff")
             else:
                 frame.pack_forget()
-                self.section_buttons[key].config(bg="white")
+                if key in self.section_buttons:
+                    self.section_buttons[key].config(bg="#f8f9fa", fg=HEADER_COLOR)
 
     def _set_mode(self, mode):
         self.mode = mode
@@ -319,7 +586,6 @@ class HRISApp:
         self.update_camera()
 
     def _validate_profile(self):
-        """Cross-checks required profile information against strict patterns and displays inline warning criteria."""
         profile = {key: var.get().strip() for key, var in self.signup_vars.items()}
 
         missing = [key for key, value in profile.items() if not value]
@@ -407,22 +673,25 @@ class HRISApp:
 
     def _activate_employee_session(self, employee_id):
         self.logged_in_employee_id = employee_id
-        self.session_label.config(text=f"Employee Session: {employee_id}")
+        self.session_label.config(text="LOGGED IN")
+        self.session_label.config(bg="#28a745")
+        self.session_badge.config(bg="#28a745")
         self.logout_btn.config(state="normal")
         self.section_buttons["biometric"].config(state="normal")
         self.section_buttons["logs"].config(state="normal")
-        self.logs_scope_label.config(text=f"Viewing logs for logged in employee: {employee_id}")
+        self.logs_scope_label.config(text=f"Viewing logs for: {employee_id}")
 
         employee = get_employee(employee_id)
         if employee:
             self.profile_label.config(
                 text=(
-                    f"SESSION ACTIVE\n"
+                    f"✓ SESSION ACTIVE\n\n"
                     f"ID: {employee['employee_id']}\n"
                     f"Name: {employee['full_name']}\n"
                     f"Dept: {employee['department']}\n"
                     f"Role: {employee['role_position']}"
-                )
+                ),
+                fg=HEADER_COLOR
             )
 
     def _logout_employee(self):
@@ -435,15 +704,17 @@ class HRISApp:
         self._set_mode("idle")
         self.capture_label.config(text=f"Captured: 0/{MAX_SAMPLES}")
 
-        self.session_label.config(text="Employee Session: Not Logged In")
+        self.session_label.config(text="NOT LOGGED IN")
+        self.session_label.config(bg="#c9302c")
+        self.session_badge.config(bg="#c9302c")
         self.logout_btn.config(state="disabled")
         self.section_buttons["biometric"].config(state="disabled")
         self.section_buttons["logs"].config(state="disabled")
         self.logs_scope_label.config(text="Available only when employee is logged in.")
-        self.profile_label.config(text="No employee session")
+        self.profile_label.config(text="No employee session active", fg="#6c757d")
 
         self._show_section("auth")
-        self._set_status("Employee logged out.")
+        self._set_status("Employee logged out. Thank you for using Bank of Commerce!")
 
     def _require_employee_session(self):
         if not self.logged_in_employee_id:
@@ -574,11 +845,12 @@ class HRISApp:
 
             self.profile_label.config(
                 text=(
-                    f"VERIFIED FOR ACTION\n"
+                    f"✓ VERIFIED FOR {action.replace('_', ' ')}\n\n"
                     f"ID: {self.logged_in_employee_id}\n"
                     f"Action: {action.replace('_', ' ')}\n"
                     f"Score: {float(result['score']):.3f}"
-                )
+                ),
+                fg="#28a745"
             )
         else:
             self._set_status(f"Verification failed: {result['reason']}")
@@ -659,41 +931,47 @@ class HRISApp:
         ulwindow.minsize(700, 500)
         ulwindow.config(bg=BG_COLOR)
 
-        table_frame = tk.Frame(ulwindow, bg=BG_COLOR)
-        table_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        header = tk.Frame(ulwindow, bg=HEADER_COLOR, padx=15, pady=10)
+        header.pack(fill="x")
+        tk.Label(header, text=f"📋 User Logs - {target_employee_id}", 
+                bg=HEADER_COLOR, fg="#ffffff", font=("Segoe UI", 14, "bold")).pack(side="left")
 
-        headers = ["No. of Logs", "Day", "Time In", "Time Out"]
+        table_frame = tk.Frame(ulwindow, bg=BG_COLOR, padx=15, pady=15)
+        table_frame.pack(fill="both", expand=True)
+
+        headers = ["No.", "Day", "Time In", "Time Out"]
+        
         for col, header_text in enumerate(headers):
             tk.Label(
                 table_frame,
                 text=header_text,
-                font=("Arial", 10, "bold"),
+                font=("Segoe UI", 11, "bold"),
                 bg=HEADER_COLOR,
                 fg="white",
-                padx=10,
+                padx=15,
                 pady=10,
-                relief="ridge",
-                borderwidth=2,
+                relief="flat",
             ).grid(column=col, row=0, sticky="nsew", padx=2, pady=2)
             table_frame.columnconfigure(col, weight=1)
 
         if not session_rows:
-            tk.Label(table_frame, text="No logs found.", bg="white").grid(column=0, row=1, columnspan=4, sticky="nsew")
+            tk.Label(table_frame, text="No logs found.", bg=FORM_BG,
+                    font=("Segoe UI", 12), fg="#6c757d").grid(column=0, row=1, columnspan=4, sticky="nsew", pady=20)
             return
 
         for idx, session in enumerate(session_rows, start=1):
             row_data = [str(idx), session["day"], session["time_in"], session["time_out"]]
+            row_bg = FORM_BG if idx % 2 == 1 else "#f8f9fa"
             for col_idx, cell_data in enumerate(row_data):
                 tk.Label(
                     table_frame,
                     text=cell_data,
-                    font=("Arial", 10),
-                    bg="white",
-                    fg="black",
-                    padx=10,
+                    font=("Segoe UI", 11),
+                    bg=row_bg,
+                    fg=HEADER_COLOR,
+                    padx=15,
                     pady=10,
-                    relief="solid",
-                    borderwidth=1,
+                    relief="flat",
                 ).grid(column=col_idx, row=idx, sticky="nsew", padx=2, pady=2)
 
     def _classify_error(self, reason):
@@ -726,26 +1004,31 @@ class HRISApp:
         lewindow.minsize(760, 500)
         lewindow.config(bg=BG_COLOR)
 
-        table_frame = tk.Frame(lewindow, bg=BG_COLOR)
-        table_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        header = tk.Frame(lewindow, bg=HEADER_COLOR, padx=15, pady=10)
+        header.pack(fill="x")
+        tk.Label(header, text=f"⚠️ Error Logs - {target_employee_id}", 
+                bg=HEADER_COLOR, fg="#ffffff", font=("Segoe UI", 14, "bold")).pack(side="left")
 
-        headers = ["No. of Error", "Day", "Time", "Type"]
+        table_frame = tk.Frame(lewindow, bg=BG_COLOR, padx=15, pady=15)
+        table_frame.pack(fill="both", expand=True)
+
+        headers = ["No.", "Day", "Time", "Type"]
         for col, header_text in enumerate(headers):
             tk.Label(
                 table_frame,
                 text=header_text,
-                font=("Arial", 10, "bold"),
+                font=("Segoe UI", 11, "bold"),
                 bg=HEADER_COLOR,
                 fg="white",
-                padx=10,
+                padx=15,
                 pady=10,
-                relief="ridge",
-                borderwidth=2,
+                relief="flat",
             ).grid(column=col, row=0, sticky="nsew", padx=2, pady=2)
             table_frame.columnconfigure(col, weight=1)
 
         if not errors:
-            tk.Label(table_frame, text="No error logs found.", bg="white").grid(column=0, row=1, columnspan=4, sticky="nsew")
+            tk.Label(table_frame, text="No error logs found.", bg=FORM_BG,
+                    font=("Segoe UI", 12), fg="#6c757d").grid(column=0, row=1, columnspan=4, sticky="nsew", pady=20)
             return
 
         for idx, row in enumerate(errors, start=1):
@@ -756,17 +1039,17 @@ class HRISApp:
                 stamp.strftime("%I:%M %p"),
                 self._classify_error(row["message"]),
             ]
+            row_bg = FORM_BG if idx % 2 == 1 else "#f8f9fa"
             for col_idx, cell_data in enumerate(row_data):
                 tk.Label(
                     table_frame,
                     text=cell_data,
-                    font=("Arial", 10),
-                    bg="white",
-                    fg="black",
-                    padx=10,
+                    font=("Segoe UI", 11),
+                    bg=row_bg,
+                    fg=HEADER_COLOR,
+                    padx=15,
                     pady=10,
-                    relief="solid",
-                    borderwidth=1,
+                    relief="flat",
                 ).grid(column=col_idx, row=idx, sticky="nsew", padx=2, pady=2)
 
     def log_summary_clicked(self):
@@ -782,7 +1065,6 @@ class HRISApp:
 
         rows = sorted(rows, key=lambda row: row["timestamp"])
 
-        # Keep real, date-based aggregates so the chart reflects actual logs, not weekday buckets.
         log_data = {}
         for row in rows:
             stamp = datetime.fromisoformat(row["timestamp"])
@@ -795,65 +1077,77 @@ class HRISApp:
                 log_data[day_key]["time_out"].append(as_float)
 
         lswindow = tk.Toplevel(self.window)
-        lswindow.title(f"Log Summary - {target_employee_id}")
-        lswindow.minsize(820, 600)
+        lswindow.title(f"Attendance Summary - {target_employee_id}")
+        lswindow.geometry("1000x650")
+        lswindow.minsize(900, 550)
         lswindow.config(bg=BG_COLOR)
+
+        header = tk.Frame(lswindow, bg=HEADER_COLOR, padx=20, pady=12)
+        header.pack(fill="x")
+        tk.Label(header, text="📊 Attendance Summary", bg=HEADER_COLOR, fg="#ffffff", 
+                font=("Segoe UI", 16, "bold")).pack(side="left")
 
         view_state = {"current": "time_in"}
 
-        button_frame = tk.Frame(lswindow, bg=BG_COLOR)
-        button_frame.pack(side="top", fill="x", padx=10, pady=10)
+        btn_frame = tk.Frame(lswindow, bg=FORM_BG, padx=20, pady=12)
+        btn_frame.pack(fill="x")
+
+        time_in_btn = tk.Button(btn_frame, text="🕐  Time In Stats", bg=ACCENT_COLOR, fg="#ffffff", 
+                               font=("Segoe UI", 12, "bold"), relief="flat", cursor="hand2",
+                               command=lambda: update_view("time_in"), width=15, pady=8)
+        time_in_btn.pack(side="left", padx=(0, 15))
+
+        time_out_btn = tk.Button(btn_frame, text="🕑  Time Out Stats", bg="#6c757d", fg="#ffffff",
+                               font=("Segoe UI", 12, "bold"), relief="flat", cursor="hand2",
+                               command=lambda: update_view("time_out"), width=15, pady=8)
+        time_out_btn.pack(side="left")
+
+        for btn in [time_in_btn, time_out_btn]:
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=ACCENT_HOVER if b == time_in_btn else "#5a6268"))
+            btn.bind("<Leave>", lambda e, b=btn: b.config(bg=ACCENT_COLOR if b == time_in_btn else "#6c757d"))
 
         content_frame = tk.Frame(lswindow, bg=BG_COLOR)
-        content_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        content_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-        graph_frame = tk.Frame(content_frame, bg="white", relief="solid", borderwidth=1)
-        graph_frame.pack(side="left", fill="both", expand=True)
+        graph_container = tk.Frame(content_frame, bg=FORM_BG, relief="solid", bd=1, width=700, height=450)
+        graph_container.pack(side="left", fill="both", expand=True)
+        graph_container.pack_propagate(False)
 
-        stats_frame = tk.Frame(content_frame, bg=FORM_BG, width=220)
-        stats_frame.pack(side="right", fill="both", padx=(8, 0))
-        stats_frame.pack_propagate(False)
+        stats_container = tk.Frame(content_frame, bg=FORM_BG, relief="solid", bd=1, width=220)
+        stats_container.pack(side="right", fill="both", padx=(15, 0))
+        stats_container.pack_propagate(False)
 
-        stats_content_frame = tk.Frame(stats_frame, bg=FORM_BG)
-        stats_content_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        stats_header = tk.Frame(stats_container, bg=HEADER_COLOR)
+        stats_header.pack(fill="x")
+        tk.Label(stats_header, text="📈 Quick Stats", bg=HEADER_COLOR, fg="#ffffff",
+                font=("Segoe UI", 13, "bold"), pady=10).pack()
 
-        time_in_btn = tk.Button(
-            button_frame,
-            text="Time In",
-            bg=ACCENT_COLOR,
-            fg="black",
-            command=lambda: update_view("time_in"),
-        )
-        time_out_btn = tk.Button(
-            button_frame,
-            text="Time Out",
-            bg=HEADER_COLOR,
-            fg="white",
-            command=lambda: update_view("time_out"),
-        )
-        time_in_btn.pack(side="left", padx=5)
-        time_out_btn.pack(side="left", padx=5)
+        stats_inner = tk.Frame(stats_container, bg=FORM_BG)
+        stats_inner.pack(fill="both", expand=True, padx=15, pady=15)
 
         def update_view(view_type):
             view_state["current"] = view_type
             if view_type == "time_in":
-                time_in_btn.config(bg=ACCENT_COLOR, fg="black")
-                time_out_btn.config(bg=HEADER_COLOR, fg="white")
+                time_in_btn.config(bg=ACCENT_COLOR, fg="#ffffff")
+                time_out_btn.config(bg="#6c757d", fg="#ffffff")
             else:
-                time_in_btn.config(bg=HEADER_COLOR, fg="white")
-                time_out_btn.config(bg=ACCENT_COLOR, fg="black")
+                time_in_btn.config(bg="#6c757d", fg="#ffffff")
+                time_out_btn.config(bg=ACCENT_COLOR, fg="#ffffff")
             update_graph_and_stats()
 
         def update_graph_and_stats():
-            for widget in graph_frame.winfo_children():
+            for widget in graph_container.winfo_children():
                 widget.destroy()
-            for widget in stats_content_frame.winfo_children():
+            for widget in stats_inner.winfo_children():
                 widget.destroy()
+
+            lswindow.update_idletasks()
 
             days = list(sorted(log_data.keys()))
             day_numbers = np.arange(len(days))
-            fig = Figure(figsize=(6, 4), dpi=100)
+            fig = Figure(figsize=(6.5, 4.5))
             ax = fig.add_subplot(111)
+            fig.patch.set_facecolor('#ffffff')
 
             if view_state["current"] == "time_in":
                 early_count = 0
@@ -862,29 +1156,46 @@ class HRISApp:
                 for day in days:
                     values = log_data[day]["time_in"]
                     if values:
-                        earliest = min(values)  # earliest time in
+                        earliest = min(values)
                         times_to_plot.append(float(earliest))
-                        if earliest <= 9.0:  # standard 9AM threshold
+                        if earliest <= 9.0:
                             early_count += 1
                         else:
                             late_count += 1
                     else:
                         times_to_plot.append(np.nan)
 
-                tk.Label(stats_content_frame, text=f"Early/On-time: {early_count}", bg="#106919", fg="white").pack(fill="x", pady=4)
-                tk.Label(stats_content_frame, text=f"Late: {late_count}", bg="#8b221e", fg="white").pack(fill="x", pady=4)
+                on_time_card = tk.Frame(stats_inner, bg="#d4edda", relief="flat", bd=2)
+                on_time_card.pack(fill="x", pady=(0, 8))
+                tk.Label(on_time_card, text="✓ ON TIME", bg="#d4edda", fg="#155724",
+                        font=("Segoe UI", 10, "bold"), pady=6).pack()
+                tk.Label(on_time_card, text=str(early_count), bg="#d4edda", fg="#155724",
+                        font=("Segoe UI", 28, "bold"), pady=(0, 8)).pack()
+
+                late_card = tk.Frame(stats_inner, bg="#f8d7da", relief="flat", bd=2)
+                late_card.pack(fill="x", pady=(0, 15))
+                tk.Label(late_card, text="✗ LATE", bg="#f8d7da", fg="#721c24",
+                        font=("Segoe UI", 10, "bold"), pady=6).pack()
+                tk.Label(late_card, text=str(late_count), bg="#f8d7da", fg="#721c24",
+                        font=("Segoe UI", 28, "bold"), pady=(0, 8)).pack()
 
                 total = early_count + late_count
                 status = "NO DATA" if total == 0 else ("LATE" if late_count > early_count else "ON TIME")
-                status_bg = "#9a2925" if status == "LATE" else "#5cb85c"
+                status_bg = "#f8d7da" if status == "LATE" else "#d4edda"
+                status_fg = "#721c24" if status == "LATE" else "#155724"
                 if status == "NO DATA":
-                    status_bg = "#555555"
-                tk.Label(stats_content_frame, text=status, bg=status_bg, fg="white", font=("Arial", 11, "bold")).pack(fill="x", pady=10)
+                    status_bg = "#e2e3e5"
+                    status_fg = "#383d41"
+                status_card = tk.Frame(stats_inner, bg=status_bg, relief="flat", bd=2)
+                status_card.pack(fill="x", pady=(0, 0))
+                tk.Label(status_card, text="OVERALL STATUS", bg=status_bg, fg=status_fg,
+                        font=("Segoe UI", 9, "bold"), pady=5).pack()
+                tk.Label(status_card, text=status, bg=status_bg, fg=status_fg,
+                        font=("Segoe UI", 16, "bold"), pady=(0, 8)).pack()
 
-                lines = ax.plot(day_numbers, times_to_plot, marker="o", markersize=8, linewidth=3, color="#1f77b4", label="Time In")
-                ax.set_title("Earliest Time In by Day", fontsize=14, fontweight="bold", pad=10)
-                
-                # Dynamic Y-axis
+                ax.plot(day_numbers, times_to_plot, marker="o", markersize=10, linewidth=3,
+                       color="#007bff", label="Time In", markeredgecolor="#0056b3")
+                ax.set_title("Time In by Day", fontsize=16, fontweight="bold", pad=15, color="#333333")
                 if any(not np.isnan(v) for v in times_to_plot):
                     valid_times = [v for v in times_to_plot if not np.isnan(v)]
                     ax.set_ylim([max(0, min(valid_times) - 1), min(24, max(valid_times) + 1)])
@@ -897,70 +1208,68 @@ class HRISApp:
                 for day in days:
                     values = log_data[day]["time_out"]
                     if values:
-                        latest = max(values)  # latest time out
+                        latest = max(values)
                         times_to_plot.append(float(latest))
-                        if latest >= 17.0:  # standard 5PM threshold
+                        if latest >= 17.0:
                             overtime_count += 1
                         else:
                             undertime_count += 1
                     else:
                         times_to_plot.append(np.nan)
 
-                tk.Label(stats_content_frame, text=f"Overtime/On-time: {overtime_count}", bg="#1da22a", fg="white").pack(fill="x", pady=4)
-                tk.Label(stats_content_frame, text=f"Undertime: {undertime_count}", bg="#b31616", fg="white").pack(fill="x", pady=4)
+                on_time_card = tk.Frame(stats_inner, bg="#d4edda", relief="flat", bd=2)
+                on_time_card.pack(fill="x", pady=(0, 8))
+                tk.Label(on_time_card, text="✓ OVERTIME", bg="#d4edda", fg="#155724",
+                        font=("Segoe UI", 10, "bold"), pady=6).pack()
+                tk.Label(on_time_card, text=str(overtime_count), bg="#d4edda", fg="#155724",
+                        font=("Segoe UI", 28, "bold"), pady=(0, 8)).pack()
+
+                late_card = tk.Frame(stats_inner, bg="#f8d7da", relief="flat", bd=2)
+                late_card.pack(fill="x", pady=(0, 15))
+                tk.Label(late_card, text="✗ EARLY OUT", bg="#f8d7da", fg="#721c24",
+                        font=("Segoe UI", 10, "bold"), pady=6).pack()
+                tk.Label(late_card, text=str(undertime_count), bg="#f8d7da", fg="#721c24",
+                        font=("Segoe UI", 28, "bold"), pady=(0, 8)).pack()
 
                 total = overtime_count + undertime_count
-                status = "NO DATA" if total == 0 else ("UNDERTIME" if undertime_count > overtime_count else "ON TIME")
-                status_bg = "#d9534f" if status == "UNDERTIME" else "#5cb85c"
+                status = "NO DATA" if total == 0 else ("EARLY OUT" if undertime_count > overtime_count else "ON TIME")
+                status_bg = "#f8d7da" if status == "EARLY OUT" else "#d4edda"
+                status_fg = "#721c24" if status == "EARLY OUT" else "#155724"
                 if status == "NO DATA":
-                    status_bg = "#555555"
-                tk.Label(stats_content_frame, text=status, bg=status_bg, fg="white", font=("Arial", 11, "bold")).pack(fill="x", pady=10)
+                    status_bg = "#e2e3e5"
+                    status_fg = "#383d41"
+                status_card = tk.Frame(stats_inner, bg=status_bg, relief="flat", bd=2)
+                status_card.pack(fill="x", pady=(0, 0))
+                tk.Label(status_card, text="OVERALL STATUS", bg=status_bg, fg=status_fg,
+                        font=("Segoe UI", 9, "bold"), pady=5).pack()
+                tk.Label(status_card, text=status, bg=status_bg, fg=status_fg,
+                        font=("Segoe UI", 16, "bold"), pady=(0, 8)).pack()
 
-                lines = ax.plot(day_numbers, times_to_plot, marker="o", markersize=8, linewidth=3, color="#ff7f0e", label="Time Out")
-                ax.set_title("Latest Time Out by Day", fontsize=14, fontweight="bold", pad=10)
-                
+                ax.plot(day_numbers, times_to_plot, marker="o", markersize=10, linewidth=3,
+                       color="#28a745", label="Time Out", markeredgecolor="#1e7e34")
+                ax.set_title("Time Out by Day", fontsize=16, fontweight="bold", pad=15, color="#333333")
                 if any(not np.isnan(v) for v in times_to_plot):
                     valid_times = [v for v in times_to_plot if not np.isnan(v)]
                     ax.set_ylim([max(0, min(valid_times) - 1), min(24, max(valid_times) + 1)])
                 else:
                     ax.set_ylim([15, 20])
 
+            ax.set_facecolor('#f8f9fa')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['left'].set_color('#dee2e6')
+            ax.spines['bottom'].set_color('#dee2e6')
+            ax.tick_params(colors='#6c757d', labelsize=11)
             ax.set_xticks(day_numbers)
-            ax.set_xticklabels(days, rotation=45, ha="right", fontsize=11)
-            ax.set_ylabel("Time (24h)", fontsize=12, fontweight="bold")
-            ax.tick_params(axis='y', labelsize=11)
-            ax.grid(True, alpha=0.4, linestyle='--')
-            ax.legend(fontsize=11)
-            fig.tight_layout()
+            ax.set_xticklabels([d[-5:] for d in days], rotation=45, ha="right", fontsize=10)
+            ax.set_ylabel("Time (24h)", fontsize=12, color="#6c757d")
+            ax.grid(True, alpha=0.4, color='#dee2e6')
+            ax.legend(loc='upper right', fontsize=11)
+            fig.tight_layout(pad=1.5)
 
-            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-
-            annot = ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points",
-                                bbox=dict(boxstyle="round4,pad=.5", fc="white", ec="gray", lw=1),
-                                arrowprops=dict(arrowstyle="-|>", connectionstyle="arc3,rad=-0.2", color="gray"))
-            annot.set_visible(False)
-            
-            def hover(event):
-                vis = annot.get_visible()
-                if event.inaxes == ax and lines:
-                    cont, ind = lines[0].contains(event)
-                    if cont:
-                        x_data, y_data = lines[0].get_data()
-                        idx = ind["ind"][0]
-                        annot.xy = (x_data[idx], y_data[idx])
-                        text = f"Date: {days[idx]}\nTime: {y_data[idx]:.2f}"
-                        annot.set_text(text)
-                        annot.set_visible(True)
-                        canvas.draw_idle()
-                    else:
-                        if vis:
-                            annot.set_visible(False)
-                            canvas.draw_idle()
-
-            canvas.mpl_connect("motion_notify_event", hover)
-            
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill="both", expand=True)
+            canvas = FigureCanvasTkAgg(fig, master=graph_container)
+            fig.canvas.draw()
+            canvas.get_tk_widget().place(relx=0, rely=0, relwidth=1, relheight=1)
 
         update_graph_and_stats()
 
