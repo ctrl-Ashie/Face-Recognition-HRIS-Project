@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+import numpy as np
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 from PIL import Image, ImageTk
 
 from modern_ui import apply_modern_style, ModernEntry, PrimaryButton, DangerButton, SecondaryButton, ModernStyles
@@ -177,9 +180,42 @@ class AdminPanel(tk.Toplevel):
 		toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=6)
 		PrimaryButton(toolbar, text="Refresh Summary", command=self.refresh_summary).pack(side="left", padx=2)
 
-		self.summary_text = tk.Text(self.tab_summary, wrap="word", bg=ModernStyles.CARD_BG, fg=ModernStyles.TEXT_PRIMARY)
-		self.summary_text.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
-		self.summary_text.config(state="disabled")
+		# View toggle for different summary perspectives
+		ttk.Label(toolbar, text="View:").pack(side="left", padx=(10, 4))
+		self._summary_view_state = {"current": "actions"}
+		self._summary_view_buttons = {}
+		for label, key in [("All Actions", "actions"), ("Time In", "time_in"), ("Time Out", "time_out")]:
+			btn = tk.Button(
+				toolbar,
+				text=label,
+				command=lambda k=key: self._set_summary_view(k),
+				bg=ModernStyles.HEADER_BG,
+				fg="white",
+				padx=10,
+				pady=3,
+				borderwidth=0,
+			)
+			btn.pack(side="left", padx=2)
+			self._summary_view_buttons[key] = btn
+
+		content = tk.Frame(self.tab_summary, bg=ModernStyles.FORM_BG)
+		content.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+		content.columnconfigure(0, weight=3)
+		content.columnconfigure(1, weight=1)
+		content.rowconfigure(0, weight=1)
+
+		self.summary_graph_frame = tk.Frame(content, bg="white", relief="solid", borderwidth=1)
+		self.summary_graph_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+
+		self.summary_stats_frame = tk.Frame(content, bg=ModernStyles.FORM_BG, width=260)
+		self.summary_stats_frame.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+		self.summary_stats_frame.grid_propagate(False)
+
+		self.summary_stats_content = tk.Frame(self.summary_stats_frame, bg=ModernStyles.FORM_BG)
+		self.summary_stats_content.pack(fill="both", expand=True, padx=8, pady=8)
+
+		self._summary_rows = []
+		self._style_summary_view_buttons()
 
 	def refresh_all(self):
 		self.refresh_employees()
@@ -248,17 +284,138 @@ class AdminPanel(tk.Toplevel):
 		self.log_text.config(state="disabled")
 
 	def refresh_summary(self):
-		rows = get_daily_summary(self.current_manager_id)
-		lines = ["Daily Attendance Summary", "-" * 80]
-		for row in rows:
-			lines.append(
-				f"{row['day']}: Time In={row['total_time_in']} | Time Out={row['total_time_out']} | Total={row['total_actions']}"
-			)
+		self._summary_rows = get_daily_summary(self.current_manager_id)
+		self._update_summary_view()
 
-		self.summary_text.config(state="normal")
-		self.summary_text.delete("1.0", "end")
-		self.summary_text.insert("1.0", "\n".join(lines) if lines else "No summary data found.")
-		self.summary_text.config(state="disabled")
+	def _set_summary_view(self, view_type: str):
+		self._summary_view_state["current"] = view_type
+		self._style_summary_view_buttons()
+		self._update_summary_view()
+
+	def _style_summary_view_buttons(self):
+		for key, btn in self._summary_view_buttons.items():
+			if key == self._summary_view_state["current"]:
+				btn.config(bg=ModernStyles.ACCENT_COLOR, fg="black")
+			else:
+				btn.config(bg=ModernStyles.HEADER_BG, fg="white")
+
+	def _update_summary_view(self):
+		for widget in self.summary_graph_frame.winfo_children():
+			widget.destroy()
+		for widget in self.summary_stats_content.winfo_children():
+			widget.destroy()
+
+		rows = self._summary_rows or []
+		if not rows:
+			tk.Label(
+				self.summary_graph_frame,
+				text="No summary data found.",
+				bg="white",
+				fg=ModernStyles.TEXT_SECONDARY,
+				font=ModernStyles.FONT_SUBHEADER,
+				padx=10,
+				pady=10,
+			).pack(expand=True)
+			return
+
+		# Sort by day ascending for left-to-right timeline
+		rows_sorted = sorted(rows, key=lambda r: r["day"])
+		days = [r["day"] for r in rows_sorted]
+		counts_in = [int(r["total_time_in"] or 0) for r in rows_sorted]
+		counts_out = [int(r["total_time_out"] or 0) for r in rows_sorted]
+		counts_total = [int(r["total_actions"] or 0) for r in rows_sorted]
+
+		view_type = self._summary_view_state.get("current", "actions")
+		if view_type == "time_in":
+			values = counts_in
+			title = "Daily Time In Counts"
+			color = "#1f77b4"
+			legend_label = "Time In"
+		elif view_type == "time_out":
+			values = counts_out
+			title = "Daily Time Out Counts"
+			color = "#ff7f0e"
+			legend_label = "Time Out"
+		else:
+			values = counts_total
+			title = "Total Attendance Actions per Day"
+			color = ModernStyles.ACCENT_COLOR
+			legend_label = "Actions"
+
+		indices = np.arange(len(days))
+		fig = Figure(figsize=(6, 4), dpi=100)
+		ax = fig.add_subplot(111)
+		bars = ax.bar(indices, values, color=color, alpha=0.9)
+		ax.set_title(title, fontsize=14, fontweight="bold", pad=10)
+		ax.set_xticks(indices)
+		ax.set_xticklabels(days, rotation=45, ha="right", fontsize=10)
+		ax.set_ylabel("Count", fontsize=12, fontweight="bold")
+		ax.grid(axis="y", alpha=0.3, linestyle="--")
+		ax.legend([legend_label], fontsize=10)
+
+		if values:
+			max_v = max(values)
+			ax.set_ylim(0, max(1, max_v + 1))
+		else:
+			ax.set_ylim(0, 1)
+
+		# Simple value labels on bars for readability
+		for bar, v in zip(bars, values):
+			if v > 0:
+				ax.text(
+					bar.get_x() + bar.get_width() / 2,
+					bar.get_height() + 0.05,
+					str(v),
+					ha="center",
+					va="bottom",
+					fontsize=9,
+				)
+
+		fig.tight_layout()
+		canvas = FigureCanvasTkAgg(fig, master=self.summary_graph_frame)
+		canvas.draw()
+		canvas.get_tk_widget().pack(fill="both", expand=True)
+
+		# Stats panel
+		total_days = len(days)
+		total_actions = sum(counts_total)
+		avg_actions = total_actions / total_days if total_days else 0
+		max_idx = int(np.argmax(values)) if values else 0
+		busiest_day = days[max_idx] if days else "N/A"
+		busiest_value = values[max_idx] if values else 0
+
+		tk.Label(
+			self.summary_stats_content,
+			text="Summary Overview",
+			bg=ModernStyles.FORM_BG,
+			fg=ModernStyles.TEXT_PRIMARY,
+			font=("Segoe UI", 12, "bold"),
+		).pack(anchor="w", pady=(0, 6))
+
+		info_lines = [
+			f"Days Tracked: {total_days}",
+			f"Total Actions: {total_actions}",
+			f"Avg Actions/Day: {avg_actions:.1f}",
+			f"Peak Day: {busiest_day} ({busiest_value} {legend_label.lower()})",
+		]
+		for line in info_lines:
+			tk.Label(
+				self.summary_stats_content,
+				text=line,
+				bg=ModernStyles.FORM_BG,
+				fg=ModernStyles.TEXT_PRIMARY,
+				font=ModernStyles.FONT_LABEL,
+			).pack(anchor="w", pady=2)
+
+		# Highlight hint for managers
+		tk.Label(
+			self.summary_stats_content,
+			text="Tip: Switch views above to focus\non Time In vs Time Out.",
+			bg=ModernStyles.FORM_BG,
+			fg=ModernStyles.TEXT_SECONDARY,
+			font=ModernStyles.FONT_SMALL,
+			justify="left",
+		).pack(anchor="w", pady=(10, 0))
 
 	def _clear_employee_form(self):
 		for var in self._entry_vars.values():
