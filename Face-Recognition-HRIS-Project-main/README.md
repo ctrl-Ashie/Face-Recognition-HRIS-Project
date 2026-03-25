@@ -1,104 +1,180 @@
-# Face-Recognition-HRIS
+# Face Recognition HRIS
 
-A desktop HRIS (Human Resource Information System) application with face-recognition-based employee verification, built with Python, Tkinter, and OpenCV.
+A Python desktop HRIS with face-based verification for attendance, including a dedicated employee app and a separate, database-backed admin/manager app.
 
-## Current Features
+## What Was Improved
 
-- Non-overlapping grid-based UI layout (header, camera pane, profile/actions pane, status bar).
-- Live webcam feed with face detection overlay and quality filtering.
-- Employee signup with required profile fields:
-  - Employee ID
-  - Full Name
-  - Department
-  - Role/Position
-  - Contact Number
-  - Email
-- Face enrollment during signup (10 valid samples captured from webcam).
-- Face re-enrollment for existing employees through Admin panel.
-- Employee verification using Employee ID + local multi-frame template matching.
-- Security checks: quality filtering + claimed-ID threshold + impostor-margin comparison.
-- In-app verification state shown as `VERIFIED` or `UNVERIFIED`.
-- Attendance logging with separate `Time In` and `Time Out` actions.
-- Attendance rules:
-  - Prevents repeated consecutive `Time In`.
-  - Prevents `Time Out` before a valid `Time In`.
-- Header actions display:
-  - User Logs (attendance records)
-  - Log Error (failed verification attempts)
-  - Log Summary (daily totals)
-  - Admin Panel
+1. Fixed log summary graph accuracy:
 
-## Admin Panel (Testing Scope)
+- Log summary now accurately records earliest Time-In and latest Time-Out per day.
+- Missing dates for a view no longer inject fake default values, leaving gaps or falling back correctly.
+- Dynamic Y-axis depending on check-in/-out times.
+- Graph and stats now reflect real logs only.
 
-- View all employee accounts and full profile details.
-- View saved face photos per employee with photo preview.
-- Update employee profile fields (including Employee ID).
-- Trigger re-enrollment of face samples.
-- Hard delete employee data (employee record + attendance logs + verification logs + saved photos).
-- View verification and attendance logs.
+2. Created completely separate admin entry point & Corporate Hierarchy:
 
-## Data Storage
+- New standalone launcher: `admin_app.py`.
+- Removed Admin tools section from Employee app completely (`main.py`).
+- Admin app implements **Database-backed Authentication** allowing managers to log in autonomously with their own ID/Passwords.
+- Added corporate relationships: employees can be tied to a `manager_id`.
+- Added custom schedule tracking (`schedule_time_in`, `schedule_time_out`) per employee.
+- Managers can ONLY see and edit profiles/logs of their direct subordinates.
+- Managers cannot edit their own profiles inside the admin app.
+- Implemented a "Register Manager" portal for the very first setup via a SysAdmin secret.
 
-- SQLite database: `data/hris.db`
-- Face samples: `data/faces/<employee_id>/sample_XX.png`
-- Face templates: `data/faces/<employee_id>/template_vectors.npy`
+3. Configured cloud-capable shared storage:
 
-The application creates these paths automatically on first run.
+- `storage.py` fully supports two backends: Local SQLite (`sqlite`) and Shared Supabase DB (`supabase`).
+- In Supabase mode, admins running the portal on different systems see identical logged attendance and logs.
+
+4. Improved face verification accuracy & robustness:
+
+- Upgraded feature pipeline with grid-based spatial Local Binary Patterns (Spatial LBP).
+- Employs downsampled central crops + aggregated regional block histograms for strict position-dependent face checks drastically reducing global false positives.
+- Tightened impostor margins and recognition thresholds.
+
+5. General cleanup:
+
+- Added explanatory comments/docstrings in core sections.
+- Updated requirements and runtime configuration docs.
 
 ## Project Structure
 
-```
-main.py             # Entry point – Tkinter GUI, camera loop, signup & verification logic
-Menu.py             # Admin Panel (employee CRUD, photo viewer, log inspection)
-face_service.py     # Face detection, preprocessing, template building & verification
-storage.py          # SQLite database helpers (employees, attendance, verification logs)
-requirements.txt    # Python package dependencies
-data/               # Auto-created at runtime
-  hris.db           # SQLite database
+```text
+main.py             # Employee app (signup/login, camera, verification, attendance, employee logs)
+admin_app.py        # Standalone admin app (global employee and log management)
+Menu.py             # Admin panel UI widgets/editors used by main/admin app
+face_service.py     # Face feature extraction, template creation, verification logic
+storage.py          # Dual backend storage layer (SQLite or Supabase REST)
+requirements.txt    # Python dependencies
+data/               # Runtime data folder (local mode)
+  hris.db           # SQLite database (local mode)
   faces/            # Per-employee face samples and templates
 ```
 
 ## Requirements
 
 - Python 3.9+
-- A webcam accessible by OpenCV
-- (Optional) `BCLogo.png` in the project root for the header logo
+- Webcam accessible by OpenCV
+- Optional: `BCLogo.png` in project root
 
-## Setup
+Install dependencies:
 
-1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+## Running Apps
 
-2. Run the app:
+Run employee app:
 
-   ```bash
-   python main.py
-   ```
+```bash
+python main.py
+```
 
-## How to Use
+Run standalone admin app:
 
-1. Signup an employee:
-	- Fill all profile fields.
-	- Click `Start Signup`.
-	- Keep one face in frame until `10/10` valid samples are captured.
+```bash
+python admin_app.py
+```
 
-2. Verify identity:
-	- Enter employee ID.
-	- Click `Verify Identity`.
-	- Hold steady briefly so enough recent frames are collected.
-	- When successful, the app shows `VERIFIED` and employee details.
+Default admin credentials (if env vars are not set):
 
-3. Log attendance:
-	- Click `Time In` or `Time Out` after successful verification.
+- Username: `admin`
+- Password: `admin123`
 
-4. Admin operations:
-	- Click `Admin Panel` in the header.
-	- Manage employees, photos, updates, re-enrollment, deletions, and log inspection.
+## Storage Backends
+
+### 1. Local mode (default)
+
+No extra setup needed.
+
+```env
+HRIS_STORAGE_BACKEND=sqlite
+```
+
+### 2. Shared cloud mode (Supabase)
+
+Set environment variables (for all employee/admin devices):
+
+```env
+HRIS_STORAGE_BACKEND=supabase
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_KEY=YOUR_SUPABASE_ANON_OR_SERVICE_KEY
+HRIS_ADMIN_USER=admin
+HRIS_ADMIN_PASS=change_me
+```
+
+Create these tables in Supabase (SQL editor):
+
+```sql
+create table if not exists employees (
+  employee_id text primary key,
+  full_name text not null,
+  department text not null,
+  role_position text not null,
+  contact_number text not null,
+  email text not null,
+  created_at text not null
+);
+
+create table if not exists attendance_logs (
+  id bigint generated always as identity primary key,
+  employee_id text not null references employees(employee_id) on delete cascade,
+  action text not null,
+  timestamp text not null,
+  verified boolean not null,
+  score double precision
+);
+
+create table if not exists verification_logs (
+  id bigint generated always as identity primary key,
+  employee_id text,
+  success boolean not null,
+  score double precision,
+  message text not null,
+  timestamp text not null
+);
+
+create table if not exists error_logs (
+  id bigint generated always as identity primary key,
+  employee_id text,
+  score double precision,
+  message text not null,
+  timestamp text not null
+);
+```
+
+## Functional Sections
+
+### Employee app (`main.py`)
+
+- Auth section: employee login/signup and profile validation.
+- Biometric section: face enrollment and verification before attendance actions.
+- Logs section: employee-specific attendance logs, error logs, and accurate summary chart.
+
+### Admin app (`admin_app.py` + `Menu.py`)
+
+- Completely separate entry point from the employee app.
+- Auth gate for admin credentials.
+- Full employee list with profile update/delete.
+- Full log visibility across all employees.
+- Editable attendance, verification, and error logs.
+
+### Face services (`face_service.py`)
+
+- Face sample management and template generation.
+- Enhanced spatial block-based face embedding extraction (Spatial LBP).
+- Multi-frame verification with threshold and impostor-margin checks resulting in lower false positives.
+
+### Storage layer (`storage.py`)
+
+- Common API for both local SQLite and Supabase cloud backend.
+- Employee CRUD + attendance logs + verification/error logs.
+- Daily summary aggregation and log editing support.
 
 ## Notes
 
-- Re-enrollment immediately invalidates old templates and rebuilds from new samples.
-- For best matching results, use good lighting, keep one face centered, and avoid motion blur during verification.
+- For better accuracy: use stable lighting, frontal face, and minimal motion blur.
+- Re-enrollment replaces old local samples/templates for that employee.
+- In cloud mode, all clients must share the same Supabase project/credentials.

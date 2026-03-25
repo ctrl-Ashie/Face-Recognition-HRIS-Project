@@ -8,9 +8,9 @@ import numpy as np
 BASE_DIR = Path(__file__).resolve().parent
 FACES_DIR = BASE_DIR / "data" / "faces"
 MAX_SAMPLES = 10
-FACE_SIZE = (100, 100)
-DEFAULT_VERIFY_THRESHOLD = 0.80
-IMPOSTOR_MARGIN = 0.04
+FACE_SIZE = (128, 128)
+DEFAULT_VERIFY_THRESHOLD = 0.88
+IMPOSTOR_MARGIN = 0.08
 REQUIRED_VERIFY_FRAMES = 5
 MIN_PASS_FRAMES = 3
 TEMPLATE_FILE = "template_vectors.npy"
@@ -40,12 +40,47 @@ def save_face_sample(employee_id: str, face_bgr: np.ndarray, sample_index: int) 
 
 
 def _preprocess_face(face_bgr: np.ndarray) -> np.ndarray:
+    # Build a richer embedding by using spatial LBP (local binary patterns) and a central pixel crop.
+    # This spatial grid approach drastically reduces false positives compared to a flat global histogram.
     gray = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.equalizeHist(gray)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
     gray = cv2.resize(gray, FACE_SIZE)
-    gray = gray.astype(np.float32) / 255.0
-    flat = gray.flatten()
-    norm = np.linalg.norm(flat)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    lbp_source = gray
+    center = lbp_source[1:-1, 1:-1]
+    lbp = np.zeros_like(center, dtype=np.uint8)
+    neighbors = [
+        lbp_source[:-2, :-2],
+        lbp_source[:-2, 1:-1],
+        lbp_source[:-2, 2:],
+        lbp_source[1:-1, 2:],
+        lbp_source[2:, 2:],
+        lbp_source[2:, 1:-1],
+        lbp_source[2:, :-2],
+        lbp_source[1:-1, :-2],
+    ]
+    for idx, neighbor in enumerate(neighbors):
+        lbp |= ((neighbor >= center).astype(np.uint8) << idx)
+
+    # Compute spatial block histograms (e.g. 4x4 grid) for position-dependent texture matching
+    h, w = lbp.shape
+    grid_h, grid_w = h // 4, w // 4
+    histograms = []
+    
+    for i in range(4):
+        for j in range(4):
+            block = lbp[i * grid_h:(i + 1) * grid_h, j * grid_w:(j + 1) * grid_w]
+            hist, _ = np.histogram(block, bins=64, range=(0, 256), density=True)
+            histograms.append(hist)
+
+    # Add a downsampled center crop for direct structural/pixel matching
+    center_crop = cv2.resize(gray[16:-16, 16:-16], (32, 32))
+    pixel_vec = center_crop.astype(np.float32).flatten() / 255.0
+
+    flat = np.concatenate([pixel_vec] + histograms).astype(np.float32)
+    norm = float(np.linalg.norm(flat))
     if norm == 0:
         return flat
     return flat / norm
@@ -101,6 +136,11 @@ def _max_similarity(live_embedding: np.ndarray, template_matrix: np.ndarray) -> 
     return float(np.max(similarities)) if similarities.size else 0.0
 
 
+def _mean_similarity(live_embedding: np.ndarray, template_matrix: np.ndarray) -> float:
+    similarities = template_matrix @ live_embedding
+    return float(np.mean(similarities)) if similarities.size else 0.0
+
+
 def verify_claimed_employee(
     claimed_employee_id: str,
     face_crops: List[np.ndarray],
@@ -110,6 +150,7 @@ def verify_claimed_employee(
     required_frames: int = REQUIRED_VERIFY_FRAMES,
     min_pass_frames: int = MIN_PASS_FRAMES,
 ) -> Dict[str, object]:
+    # Multi-frame consensus: each frame must pass threshold + impostor margin checks.
     if len(face_crops) < required_frames:
         return {
             "matched": False,
@@ -137,30 +178,42 @@ def verify_claimed_employee(
     pass_count = 0
     frame_scores: List[float] = []
     best_other_overall = 0.0
+    threshold_fail_count = 0
+    margin_fail_count = 0
 
     for crop in face_crops[-required_frames:]:
         live_embedding = _preprocess_face(crop)
-        claimed_score = _max_similarity(live_embedding, claimed_template)
+        peak_score = _max_similarity(live_embedding, claimed_template)
+        mean_score = _mean_similarity(live_embedding, claimed_template)
+        claimed_score = (0.7 * peak_score) + (0.3 * mean_score)
 
         other_scores = []
         for template in other_templates.values():
             if template is None or len(template) == 0:
                 continue
-            other_scores.append(_max_similarity(live_embedding, template))
+            other_peak = _max_similarity(live_embedding, template)
+            other_mean = _mean_similarity(live_embedding, template)
+            other_scores.append((0.7 * other_peak) + (0.3 * other_mean))
         best_other = max(other_scores) if other_scores else 0.0
         best_other_overall = max(best_other_overall, best_other)
 
         if claimed_score >= threshold and (claimed_score - best_other) >= impostor_margin:
             pass_count += 1
+        else:
+            if claimed_score < threshold:
+                threshold_fail_count += 1
+            else:
+                margin_fail_count += 1
         frame_scores.append(claimed_score)
 
     avg_score = float(np.mean(frame_scores)) if frame_scores else 0.0
     matched = pass_count >= min_pass_frames
-    reason = (
-        "Verification passed with local multi-frame consensus."
-        if matched
-        else "Verification failed: threshold/margin consensus not met."
-    )
+    if matched:
+        reason = "Verification passed with local multi-frame consensus."
+    elif margin_fail_count > threshold_fail_count:
+        reason = "Verification failed: impostor margin violations detected."
+    else:
+        reason = "Verification failed: threshold consensus not met."
 
     return {
         "matched": matched,

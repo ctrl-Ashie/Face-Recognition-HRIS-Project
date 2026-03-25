@@ -1,72 +1,43 @@
+import re
 import tkinter as tk
-from collections import deque
+from tkinter import messagebox
 from datetime import datetime
 
 import cv2
-from PIL import Image, ImageTk
 import numpy as np
+from dotenv import load_dotenv
+from PIL import Image, ImageTk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
-from Menu import AdminPanel
+from modern_ui import (
+    apply_modern_style, 
+    ModernStyles, 
+    PrimaryButton, 
+    SecondaryButton, 
+    DangerButton, 
+    ModernNavButton,
+    ModernCard,
+    ModernEntry,
+    ModernLabel
+)
 
-# --- shared design constants --------------------------------------------------
-BG_COLOR = "light gray"
-HEADER_COLOR = "#010066"
-ACCENT_COLOR = "#caab2f"
-FORM_BG = "#4e4d4d"
-STATUS_BG = "#e1e1e1"
-STATUS_FG = "#1f1f1f"
-LOGO_PATH = "BCLogo.png"
-
-_logo_img = None
-
-def get_logo():
-    global _logo_img
-    if _logo_img is None:
-        image = Image.open(LOGO_PATH)
-        image = image.resize((44, 44), Image.Resampling.LANCZOS)
-        _logo_img = ImageTk.PhotoImage(image)
-    return _logo_img
-
-def apply_design(win: tk.Toplevel | tk.Tk, title: str | None = None) -> tk.Frame:
-    win.config(bg=BG_COLOR)
-    if title:
-        win.title(title)
-    header = tk.Frame(win, bg=HEADER_COLOR, padx=8, pady=6)
-    header.pack(side="top", fill="x")
-    logo_lbl = tk.Label(header, image=get_logo(), bg=HEADER_COLOR)
-    logo_lbl.pack(side="left")
-    if title:
-        title_lbl = tk.Label(
-            header,
-            text=title,
-            font=("Times New Roman", 19, "bold"),
-            bg=HEADER_COLOR,
-            fg="white",
-        )
-        title_lbl.pack(side="left", padx=10)
-    return header
-
-# -----------------------------------------------------------------------------
 from face_service import (
-    DEFAULT_VERIFY_THRESHOLD,
-    IMPOSTOR_MARGIN,
     MAX_SAMPLES,
     REQUIRED_VERIFY_FRAMES,
     build_employee_template,
     clear_employee_samples,
     get_face_region,
-    has_enough_samples,
+    load_employee_template,
     save_face_sample,
     verify_claimed_employee,
-    verifier_status,
 )
 from storage import (
     add_employee,
     can_log_action,
     employee_exists,
-    get_daily_summary,
     get_employee,
-    get_recent_attendance,
+    get_employee_attendance,
     get_recent_verification_errors,
     init_db,
     list_employees,
@@ -74,560 +45,958 @@ from storage import (
     log_verification,
 )
 
+BG_COLOR = ModernStyles.FORM_BG
+HEADER_COLOR = ModernStyles.HEADER_BG
+ACCENT_COLOR = ModernStyles.ACCENT_COLOR
+FORM_BG = ModernStyles.FORM_BG
+LOGO_PATH = "BCLogo.png"
 
-if __name__ == "__main__":
-    init_db()
-
-    # Main window
-    window = tk.Tk()
-    header = apply_design(window, "Login Monitor")
-    window.minsize(900, 600)
-    window.config(bg="light gray")
-    window.columnconfigure(0, weight=1)
-    window.rowconfigure(1, weight=1)
-
-    # Shared state
-    status_var = tk.StringVar(value="System ready. Fill profile fields and start signup or verification.")
-    verification_var = tk.StringVar(value="UNVERIFIED")
-
-    verified_employee_id = None
-    verified_score = None
-    current_faces = []
-    current_frame = None
-    face_history = deque(maxlen=12)
-
-    signup_active = False
-    signup_data = None
-    signup_count = 0
-    last_signup_capture_ts = None
-    signup_mode = "new"
-    admin_panel = None
+EMPLOYEE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,19}$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-    def set_status(message):
-        status_var.set(message)
+class HRISApp:
+    """Primary employee-facing app (auth, camera verification, attendance, and employee-scoped logs)."""
 
+    def __init__(self):
+        # Load optional .env settings for storage backend and admin credentials.
+        load_dotenv()
+        init_db()
 
-    status_info = verifier_status()
-    set_status(status_info["message"])
+        self.window = tk.Tk()
+        self.window.title("Face Recognition HRIS")
+        self.window.minsize(1120, 700)
+        self.window.config(bg=BG_COLOR)
 
+        self.logo_img = None
+        self.status_text = tk.StringVar(value="Welcome. Start from Employee Login / Signup.")
 
-    def build_text_window(title, lines):
-        child = tk.Toplevel(window)
-        apply_design(child, title)
-        child.geometry("900x550")
-        text_box = tk.Text(child, wrap="word")
-        text_box.pack(fill="both", expand=True)
-        text_box.insert("1.0", "\n".join(lines) if lines else "No records found.")
-        text_box.config(state="disabled")
+        self.logged_in_employee_id = None
+        self.pending_attendance_action = None
 
+        self.mode = "idle"
+        self.enroll_profile = {}
+        self.enroll_count = 0
+        self.capture_cooldown = 0
+        self.reenroll_existing = False
+        self.verify_frames = []
 
-    def user_logs_clicked():
-        rows = get_recent_attendance(limit=250)
-        lines = ["Attendance Logs (latest first)", "-" * 90]
-        for row in rows:
-            lines.append(
-                f"[{row['timestamp']}] {row['employee_id']} | {row['full_name'] or 'Unknown'} | {row['action']} | "
-                f"Verified={bool(row['verified'])} | Score={row['score'] if row['score'] is not None else 'N/A'}"
-            )
-        build_text_window("User Logs", lines)
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        self.cap = cv2.VideoCapture(0)
 
+        apply_modern_style()
 
-    def log_error_clicked():
-        rows = get_recent_verification_errors(limit=250)
-        lines = ["Verification Errors (latest first)", "-" * 90]
-        for row in rows:
-            lines.append(
-                f"[{row['timestamp']}] Employee={row['employee_id'] or 'N/A'} | "
-                f"Score={row['score'] if row['score'] is not None else 'N/A'} | {row['message']}"
-            )
-        build_text_window("Log Error", lines)
+        self._build_ui()
+        self._setup_camera()
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _build_ui(self):
+        # Global shell: header, navigation, section container, and status bar.
+        header = tk.Frame(self.window, bg=HEADER_COLOR, padx=10, pady=8)
+        header.pack(side="top", fill="x")
 
-    def log_summary_clicked():
-        rows = get_daily_summary()
-        lines = ["Daily Attendance Summary", "-" * 70]
-        for row in rows:
-            lines.append(
-                f"{row['day']} | Time In: {row['total_time_in']} | Time Out: {row['total_time_out']} | Total: {row['total_actions']}"
-            )
-        build_text_window("Log Summary", lines)
+        logo = self._get_logo()
+        if logo is not None:
+            tk.Label(header, image=logo, bg=HEADER_COLOR).pack(side="left")
 
+        tk.Label(
+            header,
+            text="Face Recognition HRIS",
+            bg=HEADER_COLOR,
+            fg="white",
+            font=("Times New Roman", 20, "bold"),
+        ).pack(side="left", padx=10)
 
-    def open_admin_panel():
-        global admin_panel
-        if admin_panel is not None and admin_panel.winfo_exists():
-            admin_panel.lift()
+        self.session_label = tk.Label(
+            header,
+            text="Employee Session: Not Logged In",
+            bg=HEADER_COLOR,
+            fg="white",
+            font=("Arial", 10, "bold"),
+        )
+        self.session_label.pack(side="right")
+
+        nav = tk.Frame(self.window, bg=BG_COLOR)
+        nav.pack(fill="x", padx=10, pady=(8, 0))
+
+        self.section_buttons = {
+            "auth": ModernNavButton(nav, text="Employee Login / Signup", command=lambda: self._show_section("auth")),
+            "biometric": ModernNavButton(nav, text="Biometric Workspace", command=lambda: self._show_section("biometric"), state="disabled"),
+            "logs": ModernNavButton(nav, text="Employee Logs", command=lambda: self._show_section("logs"), state="disabled"),
+        }
+
+        self.section_buttons["auth"].pack(side="left", padx=(0, 6), pady=4)
+        self.section_buttons["biometric"].pack(side="left", padx=6, pady=4)
+        self.section_buttons["logs"].pack(side="left", padx=6, pady=4)
+
+        self.logout_btn = DangerButton(nav, text="Logout Employee", command=self._logout_employee, state="disabled")
+        self.logout_btn.pack(side="right", padx=4)
+
+        self.section_container = tk.Frame(self.window, bg=BG_COLOR)
+        self.section_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.section_frames = {
+            "auth": tk.Frame(self.section_container, bg=BG_COLOR),
+            "biometric": tk.Frame(self.section_container, bg=BG_COLOR),
+            "logs": tk.Frame(self.section_container, bg=BG_COLOR),
+        }
+
+        self._build_auth_section(self.section_frames["auth"])
+        self._build_biometric_section(self.section_frames["biometric"])
+        self._build_logs_section(self.section_frames["logs"])
+
+        self._show_section("auth")
+
+        status_bar = tk.Label(
+            self.window,
+            textvariable=self.status_text,
+            anchor="w",
+            bg=HEADER_COLOR,
+            fg="white",
+            padx=10,
+            pady=6,
+        )
+        status_bar.pack(side="bottom", fill="x")
+
+    def _build_auth_section(self, parent):
+        # Account access section: employee login and employee signup.
+        panel = ModernCard(parent)
+        panel.pack(fill="both", expand=True)
+        panel_inner = panel.inner
+
+        ModernLabel(panel_inner, text="Employee Account Access", fg=HEADER_COLOR, font=("Arial", 16, "bold")).pack(anchor="w")
+        ModernLabel(
+            panel_inner,
+            text="Step 1: Login or create account. Step 2: Proceed to biometric enrollment/verification.",
+            fg="#333333",
+        ).pack(anchor="w", pady=(4, 12))
+
+        login_box = tk.LabelFrame(panel_inner, text="Login", bg=ModernStyles.CARD_BG, padx=10, pady=10)
+        login_box.pack(fill="x", pady=(0, 12))
+
+        login_row = tk.Frame(login_box, bg=ModernStyles.CARD_BG)
+        login_row.pack(fill="x")
+        ModernLabel(login_row, text="Employee ID", width=14, anchor="w", bg=ModernStyles.CARD_BG).pack(side="left")
+        self.login_id_var = tk.StringVar()
+        ModernEntry(login_row, textvariable=self.login_id_var, bg=ModernStyles.CARD_BG).pack(side="left", fill="x", expand=True)
+        PrimaryButton(login_row, text="Login", command=self._login_employee).pack(side="left", padx=(8, 0))
+
+        signup_box = tk.LabelFrame(panel_inner, text="Signup", bg=ModernStyles.CARD_BG, padx=10, pady=10)
+        signup_box.pack(fill="x")
+
+        self.signup_vars = {
+            "employee_id": tk.StringVar(),
+            "full_name": tk.StringVar(),
+            "department": tk.StringVar(),
+            "role_position": tk.StringVar(),
+            "contact_number": tk.StringVar(),
+            "email": tk.StringVar(),
+        }
+
+        self._build_form_field(signup_box, "Employee ID", self.signup_vars["employee_id"])
+        self._build_form_field(signup_box, "Full Name", self.signup_vars["full_name"])
+        self._build_form_field(signup_box, "Department", self.signup_vars["department"])
+        self._build_form_field(signup_box, "Role / Position", self.signup_vars["role_position"])
+        self._build_form_field(signup_box, "Contact Number", self.signup_vars["contact_number"])
+        self._build_form_field(signup_box, "Email", self.signup_vars["email"])
+
+        PrimaryButton(signup_box, text="Create Account", command=self._signup_employee).pack(fill="x", pady=(8, 0))
+
+    def _build_biometric_section(self, parent):
+        # Camera workspace for enrollment and attendance verification workflows.
+        left = tk.Frame(parent, bg=BG_COLOR)
+        left.pack(side="left", fill="both", expand=True)
+
+        right = ModernCard(parent)
+        right.pack(side="right", fill="y", padx=(10, 0))
+        right_inner = right.inner
+
+        self.cam_label = tk.Label(left, bg="black")
+        self.cam_label.pack(fill="both", expand=True)
+
+        self.profile_label = tk.Label(
+            left,
+            text="No employee session",
+            font=("Arial", 11, "bold"),
+            bg=ModernStyles.CARD_BG,
+            fg="black",
+            justify="left",
+            anchor="nw",
+            padx=8,
+            pady=8,
+            height=7,
+        )
+        self.profile_label.pack(fill="x", pady=(8, 0))
+
+        ModernLabel(right_inner, text="Biometric Enrollment", font=("Arial", 12, "bold"), bg=ModernStyles.CARD_BG).pack(anchor="w", padx=10, pady=(8, 4))
+        ModernLabel(
+            right_inner,
+            text="Use this for initial enrollment or re-enrollment.",
+            fg="#333333",
+            wraplength=260,
+            justify="left",
+            bg=ModernStyles.CARD_BG
+        ).pack(anchor="w", padx=10)
+        PrimaryButton(right_inner, text="Start Face Enrollment", command=self.start_enrollment).pack(fill="x", padx=10, pady=(8, 10))
+
+        ModernLabel(right_inner, text="Attendance", font=("Arial", 12, "bold"), bg=ModernStyles.CARD_BG).pack(
+            anchor="w", padx=10, pady=(8, 4)
+        )
+        PrimaryButton(
+            right_inner,
+            text="Verify and Time In",
+            command=lambda: self.start_verification_for_action("TIME_IN"),
+        ).pack(fill="x", padx=10, pady=(4, 6))
+        SecondaryButton(
+            right_inner,
+            text="Verify and Time Out",
+            command=lambda: self.start_verification_for_action("TIME_OUT"),
+        ).pack(fill="x", padx=10, pady=(0, 10))
+
+        self.mode_label = ModernLabel(right_inner, text="Mode: Idle", fg=HEADER_COLOR, font=("Arial", 10, "bold"), bg=ModernStyles.CARD_BG)
+        self.mode_label.pack(fill="x", padx=10, pady=(0, 6))
+
+        self.capture_label = ModernLabel(right_inner, text=f"Captured: 0/{MAX_SAMPLES}", bg=ModernStyles.CARD_BG)
+        self.capture_label.pack(fill="x", padx=10, pady=(0, 8))
+
+    def _build_logs_section(self, parent):
+        # Employee-only log views and summary analytics.
+        panel = ModernCard(parent)
+        panel.pack(fill="both", expand=True)
+        panel_inner = panel.inner
+
+        ModernLabel(panel_inner, text="Employee Logs", fg=HEADER_COLOR, font=("Arial", 16, "bold")).pack(anchor="w")
+        self.logs_scope_label = ModernLabel(
+            panel_inner,
+            text="Available only when employee is logged in.",
+            fg="#333333",
+        )
+        self.logs_scope_label.pack(anchor="w", pady=(4, 12))
+
+        action_row = tk.Frame(panel_inner, bg=ModernStyles.CARD_BG)
+        action_row.pack(fill="x", pady=(6, 8))
+        PrimaryButton(action_row, text="User Logs", command=self.user_logs_clicked).pack(side="left", padx=(0, 8))
+        PrimaryButton(action_row, text="Log Error", command=self.log_error_clicked).pack(side="left", padx=8)
+        PrimaryButton(action_row, text="Log Summary", command=self.log_summary_clicked).pack(side="left", padx=8)
+
+    def _build_form_field(self, parent, label, var):
+        # Wraps labels alongside text string entry variables enforcing padding constraints.
+        row = tk.Frame(parent, bg=ModernStyles.CARD_BG)
+        row.pack(fill="x", pady=2)
+        ModernLabel(row, text=label, width=15, anchor="w", bg=ModernStyles.CARD_BG).pack(side="left")
+        ModernEntry(row, textvariable=var, bg=ModernStyles.CARD_BG).pack(side="left", fill="x", expand=True)
+
+    def _show_section(self, section):
+        """Displays designated UI segments selectively masking hidden panels simulating app navigation."""
+        if section in {"biometric", "logs"} and not self.logged_in_employee_id:
+            messagebox.showwarning("Employee Session", "Login first to access this section.")
+            section = "auth"
+
+        for key, frame in self.section_frames.items():
+            if key == section:
+                frame.pack(fill="both", expand=True)
+                if hasattr(self.section_buttons[key], 'set_active'):
+                    self.section_buttons[key].set_active(True)
+            else:
+                frame.pack_forget()
+                if hasattr(self.section_buttons[key], 'set_active'):
+                    self.section_buttons[key].set_active(False)
+
+    def _set_mode(self, mode):
+        self.mode = mode
+        self.mode_label.config(text=f"Mode: {mode.replace('_', ' ').title()}")
+
+    def _set_status(self, message):
+        self.status_text.set(message)
+
+    def _get_logo(self):
+        if self.logo_img is not None:
+            return self.logo_img
+
+        try:
+            image = Image.open(LOGO_PATH)
+            image = image.resize((44, 44), Image.Resampling.LANCZOS)
+            self.logo_img = ImageTk.PhotoImage(image)
+            return self.logo_img
+        except Exception:
+            return None
+
+    def _setup_camera(self):
+        ret, frame = self.cap.read()
+        if ret:
+            h, w = frame.shape[:2]
+            self.cam_w = 700
+            self.cam_h = int(self.cam_w * h / w)
+        else:
+            self.cam_w = 700
+            self.cam_h = 525
+        self.cam_label.config(width=self.cam_w, height=self.cam_h)
+        self.update_camera()
+
+    def _validate_profile(self):
+        """Cross-checks required profile information against strict patterns and displays inline warning criteria."""
+        profile = {key: var.get().strip() for key, var in self.signup_vars.items()}
+
+        missing = [key for key, value in profile.items() if not value]
+        if missing:
+            return None, "ERROR: All signup fields are required to prevent data loss."
+
+        if not EMPLOYEE_ID_PATTERN.match(profile["employee_id"]):
+            return None, "ERROR: Employee ID strictly must be 3-20 chars using letters, numbers, _ or -."
+
+        if not EMAIL_PATTERN.match(profile["email"]):
+            return None, "ERROR: Email format is logically inconsistent or invalid."
+
+        digits = re.sub(r"\D", "", profile["contact_number"])
+        if len(digits) < 7 or len(digits) > 15:
+            return None, "ERROR: Contact number must contain between 7 to 15 digits."
+
+        if employee_exists(profile["employee_id"]):
+            return None, "CONFLICT: Employee ID already exists in the backend database."
+
+        return profile, "OK"
+
+    def _validate_face_quality(self, face_crop):
+        if face_crop is None or face_crop.size == 0:
+            return False, "No face detected."
+
+        h, w = face_crop.shape[:2]
+        if h < 80 or w < 80:
+            return False, "Face too small. Move closer to camera."
+
+        gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+        brightness = float(np.mean(gray))
+        blur = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        if brightness < 50:
+            return False, "Image too dark. Improve lighting."
+        if blur < 80:
+            return False, "Image too blurry. Hold still."
+
+        return True, "OK"
+
+    def _login_employee(self):
+        employee_id = self.login_id_var.get().strip()
+        if not employee_id:
+            messagebox.showerror("Login", "Enter Employee ID.")
             return
-        # using apply_design inside panel so header shows correctly
-        admin_panel = AdminPanel(window, on_status=set_status, on_reenroll=start_reenroll_for_employee)
 
+        employee = get_employee(employee_id)
+        if employee is None:
+            messagebox.showerror("Login", "Employee account not found.")
+            return
 
-    def update_verification_ui(verified, employee=None, score=None, message=None):
-        global verified_employee_id, verified_score
+        self._activate_employee_session(employee_id)
+        self._show_section("biometric")
 
-        if verified and employee:
-            verified_employee_id = employee["employee_id"]
-            verified_score = score
-            verification_var.set(f"VERIFIED: {employee['full_name']} ({employee['employee_id']})")
-            verification_label.config(bg="#2e8b57")
-            profile_value.config(
+        if load_employee_template(employee_id) is None:
+            self._set_status("Login successful. No biometric template found; start enrollment next.")
+        else:
+            self._set_status("Login successful. Proceed to verification for each attendance action.")
+
+    def _signup_employee(self):
+        profile, msg = self._validate_profile()
+        if profile is None:
+            messagebox.showerror("Signup", msg)
+            return
+
+        try:
+            add_employee(
+                profile["employee_id"],
+                profile["full_name"],
+                profile["department"],
+                profile["role_position"],
+                profile["contact_number"],
+                profile["email"],
+            )
+        except Exception as exc:
+            messagebox.showerror("Signup", f"Unable to create account: {exc}")
+            return
+
+        for var in self.signup_vars.values():
+            var.set("")
+
+        self._activate_employee_session(profile["employee_id"])
+        self._show_section("biometric")
+        self._set_status("Account created. Continue with biometric enrollment.")
+
+    def _activate_employee_session(self, employee_id):
+        self.logged_in_employee_id = employee_id
+        self.session_label.config(text=f"Employee Session: {employee_id}")
+        self.logout_btn.config(state="normal")
+        self.section_buttons["biometric"].config(state="normal")
+        self.section_buttons["logs"].config(state="normal")
+        self.logs_scope_label.config(text=f"Viewing logs for logged in employee: {employee_id}")
+
+        employee = get_employee(employee_id)
+        if employee:
+            self.profile_label.config(
                 text=(
+                    f"SESSION ACTIVE\n"
                     f"ID: {employee['employee_id']}\n"
                     f"Name: {employee['full_name']}\n"
                     f"Dept: {employee['department']}\n"
-                    f"Role: {employee['role_position']}\n"
-                    f"Contact: {employee['contact_number']}\n"
-                    f"Email: {employee['email']}\n"
-                    f"Match Score: {score:.3f}"
+                    f"Role: {employee['role_position']}"
                 )
             )
-            set_status(message or "Identity verified.")
-        else:
-            verified_employee_id = None
-            verified_score = None
-            verification_var.set("UNVERIFIED")
-            verification_label.config(bg="#caab2f")
-            profile_value.config(text="No verified employee.")
-            set_status(message or "Identity not verified.")
 
+    def _logout_employee(self):
+        self.logged_in_employee_id = None
+        self.pending_attendance_action = None
+        self.verify_frames = []
+        self.enroll_profile = {}
+        self.enroll_count = 0
+        self.reenroll_existing = False
+        self._set_mode("idle")
+        self.capture_label.config(text=f"Captured: 0/{MAX_SAMPLES}")
 
-    def create_entry_row(parent, row, label_text):
-        tk.Label(parent, text=label_text, width=12, anchor="w", bg="#4e4d4d", fg="white").grid(
-            row=row, column=0, sticky="w", padx=(0, 8), pady=2
+        self.session_label.config(text="Employee Session: Not Logged In")
+        self.logout_btn.config(state="disabled")
+        self.section_buttons["biometric"].config(state="disabled")
+        self.section_buttons["logs"].config(state="disabled")
+        self.logs_scope_label.config(text="Available only when employee is logged in.")
+        self.profile_label.config(text="No employee session")
+
+        self._show_section("auth")
+        self._set_status("Employee logged out.")
+
+    def _require_employee_session(self):
+        if not self.logged_in_employee_id:
+            messagebox.showwarning("Employee Session", "Login first.")
+            self._show_section("auth")
+            return False
+        return True
+
+    def start_enrollment(self):
+        if not self._require_employee_session():
+            return
+
+        if self.mode != "idle":
+            messagebox.showwarning("Enrollment", "System is busy. Finish current action first.")
+            return
+
+        employee = get_employee(self.logged_in_employee_id)
+        if employee is None:
+            messagebox.showerror("Enrollment", "Employee profile not found.")
+            return
+
+        self.enroll_profile = employee
+        self.enroll_count = 0
+        self.capture_cooldown = 0
+        self.reenroll_existing = True
+
+        clear_employee_samples(self.logged_in_employee_id)
+        self.capture_label.config(text=f"Captured: 0/{MAX_SAMPLES}")
+        self._set_mode("signup")
+        self._set_status("Enrollment started. Keep one face centered until all samples are captured.")
+
+    def start_verification_for_action(self, action):
+        if not self._require_employee_session():
+            return
+
+        if self.mode != "idle":
+            messagebox.showwarning("Verification", "System is busy. Finish current action first.")
+            return
+
+        if load_employee_template(self.logged_in_employee_id) is None:
+            messagebox.showwarning("Verification", "No enrolled template found. Run enrollment first.")
+            self._set_status("Verification denied: No enrolled template found.")
+            log_verification(self.logged_in_employee_id, False, None, "No enrolled template found for employee.")
+            return
+
+        self.pending_attendance_action = action
+        self.verify_frames = []
+        self.capture_cooldown = 0
+        self._set_mode("verify")
+        self._set_status(
+            f"Verification started for {action.replace('_', ' ')}. Hold still for {REQUIRED_VERIFY_FRAMES} frames."
         )
-        entry = tk.Entry(parent)
-        entry.grid(row=row, column=1, sticky="ew", pady=2)
-        return entry
 
-
-    def _read_form_values():
-        employee_id = entry_employee_id.get().strip()
-        full_name = entry_full_name.get().strip()
-        department = entry_department.get().strip()
-        role_position = entry_role.get().strip()
-        contact_number = entry_contact.get().strip()
-        email = entry_email.get().strip()
-        return {
-            "employee_id": employee_id,
-            "full_name": full_name,
-            "department": department,
-            "role_position": role_position,
-            "contact_number": contact_number,
-            "email": email,
-        }
-
-
-    def _fill_form_from_employee(employee):
-        entry_employee_id.delete(0, "end")
-        entry_employee_id.insert(0, employee["employee_id"])
-        entry_full_name.delete(0, "end")
-        entry_full_name.insert(0, employee["full_name"])
-        entry_department.delete(0, "end")
-        entry_department.insert(0, employee["department"])
-        entry_role.delete(0, "end")
-        entry_role.insert(0, employee["role_position"])
-        entry_contact.delete(0, "end")
-        entry_contact.insert(0, employee["contact_number"])
-        entry_email.delete(0, "end")
-        entry_email.insert(0, employee["email"])
-
-
-    def start_signup():
-        global signup_active, signup_data, signup_count, last_signup_capture_ts, signup_mode
-
-        form = _read_form_values()
-        if not all(form.values()):
-            set_status("Please fill in all signup fields before enrollment.")
+    def _handle_signup_frame(self, frame, face_rect):
+        if self.capture_cooldown > 0:
+            self.capture_cooldown -= 1
             return
 
-        if employee_exists(form["employee_id"]):
-            set_status("Employee ID already exists. Use a unique ID.")
+        face_crop = get_face_region(frame, face_rect)
+        is_valid, reason = self._validate_face_quality(face_crop)
+        if not is_valid:
+            self._set_status(f"Invalid biometric sample: {reason}")
+            self.capture_cooldown = 10
             return
 
-        clear_employee_samples(form["employee_id"])
-        signup_active = True
-        signup_data = form
-        signup_mode = "new"
-        signup_count = 0
-        last_signup_capture_ts = None
-        set_status("Signup started. Keep one face centered until 10 valid samples are captured.")
+        self.enroll_count += 1
+        employee_id = self.enroll_profile["employee_id"]
+        save_face_sample(employee_id, face_crop, self.enroll_count)
+        self.capture_label.config(text=f"Captured: {self.enroll_count}/{MAX_SAMPLES}")
+        self._set_status(f"Sample {self.enroll_count}/{MAX_SAMPLES} saved.")
+        self.capture_cooldown = 8
 
+        if self.enroll_count >= MAX_SAMPLES:
+            try:
+                build_employee_template(employee_id)
+            except Exception as exc:
+                self._set_status(f"Enrollment failed: {exc}")
+                messagebox.showerror("Enrollment", f"Failed to complete enrollment: {exc}")
+                clear_employee_samples(employee_id)
+            else:
+                messagebox.showinfo("Enrollment", f"Enrollment complete for {employee_id}.")
+                self._set_status(f"Enrollment complete for {employee_id}.")
+            finally:
+                self.enroll_profile = {}
+                self.enroll_count = 0
+                self.reenroll_existing = False
+                self.capture_label.config(text=f"Captured: 0/{MAX_SAMPLES}")
+                self._set_mode("idle")
 
-    def start_reenroll_for_employee(employee_id):
-        global signup_active, signup_data, signup_count, last_signup_capture_ts, signup_mode
-
-        employee = get_employee(employee_id)
-        if employee is None:
-            set_status("Re-enrollment failed: employee not found.")
+    def _handle_verify_frame(self, frame, face_rect):
+        face_crop = get_face_region(frame, face_rect)
+        valid, reason = self._validate_face_quality(face_crop)
+        if not valid:
+            self._set_status(f"Verification frame rejected: {reason}")
             return
 
-        _fill_form_from_employee(employee)
-        clear_employee_samples(employee_id)
-        signup_active = True
-        signup_data = employee
-        signup_mode = "reenroll"
-        signup_count = 0
-        last_signup_capture_ts = None
-        set_status(f"Re-enrollment started for {employee_id}. Capture 10 valid samples.")
+        self.verify_frames.append(face_crop)
+        if len(self.verify_frames) > REQUIRED_VERIFY_FRAMES:
+            self.verify_frames.pop(0)
 
+        self._set_status(
+            f"Collecting frames for verification: {len(self.verify_frames)}/{REQUIRED_VERIFY_FRAMES}"
+        )
 
-    def stop_signup():
-        global signup_active, signup_data, signup_count, last_signup_capture_ts, signup_mode
-        signup_active = False
-        signup_data = None
-        signup_count = 0
-        last_signup_capture_ts = None
-        signup_mode = "new"
-        set_status("Signup/Re-enrollment canceled.")
-
-
-    def get_single_face_roi():
-        if current_frame is None:
-            return None, "No camera frame available."
-        if len(current_faces) == 0:
-            return None, "No face detected. Please face the camera."
-        if len(current_faces) > 1:
-            return None, "Multiple faces detected. Only one face is allowed."
-        roi = get_face_region(current_frame, current_faces[0])
-        if roi is None:
-            return None, "Unable to isolate face region."
-        return roi, None
-
-
-    def is_face_quality_good(face_bgr, return_reason=False):
-        if face_bgr is None:
-            return (False, "No face") if return_reason else False
-        h, w = face_bgr.shape[:2]
-        if h < 60 or w < 60:
-            return (False, "Face too small") if return_reason else False
-
-        gray = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY)
-        blur_metric = cv2.Laplacian(gray, cv2.CV_64F).var()
-        brightness = float(np.mean(gray))
-        if blur_metric < 40:
-            return (False, f"Too blurry ({blur_metric:.0f})") if return_reason else False
-        if brightness < 35 or brightness > 225:
-            return (False, f"Bad light ({brightness:.0f})") if return_reason else False
-        return (True, "OK") if return_reason else True
-
-
-    def verify_identity():
-        employee_id = entry_employee_id.get().strip()
-        if not employee_id:
-            update_verification_ui(False, message="Enter Employee ID for verification.")
-            log_verification(None, False, None, "Verification failed: missing employee ID")
-            return
-
-        employee = get_employee(employee_id)
-        if employee is None:
-            update_verification_ui(False, message="Employee ID not found.")
-            log_verification(employee_id, False, None, "Verification failed: unknown employee ID")
-            return
-
-        if not has_enough_samples(employee_id):
-            update_verification_ui(False, message="Employee does not have enough enrolled face samples.")
-            log_verification(employee_id, False, None, "Verification failed: insufficient enrollment samples")
-            return
-
-        valid_faces = [crop for crop in list(face_history) if is_face_quality_good(crop)]
-        if len(valid_faces) < REQUIRED_VERIFY_FRAMES:
-            update_verification_ui(
-                False,
-                message=f"Need at least {REQUIRED_VERIFY_FRAMES} recent good face frames. Hold steady and retry.",
-            )
-            log_verification(employee_id, False, None, "Verification failed: insufficient good frames")
+        if len(self.verify_frames) < REQUIRED_VERIFY_FRAMES:
             return
 
         all_ids = [row["employee_id"] for row in list_employees()]
-        result = verify_claimed_employee(
-            employee_id,
-            valid_faces,
-            all_ids,
-            threshold=DEFAULT_VERIFY_THRESHOLD,
-            impostor_margin=IMPOSTOR_MARGIN,
-            required_frames=REQUIRED_VERIFY_FRAMES,
+        result = verify_claimed_employee(self.logged_in_employee_id, self.verify_frames, all_ids)
+
+        log_verification(
+            self.logged_in_employee_id,
+            bool(result["matched"]),
+            float(result["score"]),
+            str(result["reason"]),
         )
 
         if result["matched"]:
-            msg = (
-                f"Identity verified ({result['frames_passed']}/{result['frames_total']} frames passed). "
-                f"Impostor score ceiling: {result['best_other']:.3f}"
+            action = self.pending_attendance_action
+            can_log, msg = can_log_action(self.logged_in_employee_id, action)
+            if not can_log:
+                messagebox.showwarning("Attendance", msg)
+                self._set_status(msg)
+            else:
+                log_attendance(self.logged_in_employee_id, action, True, float(result["score"]))
+                messagebox.showinfo("Attendance", f"{action.replace('_', ' ')} recorded.")
+                self._set_status(f"{action.replace('_', ' ')} recorded after successful verification.")
+
+            self.profile_label.config(
+                text=(
+                    f"VERIFIED FOR ACTION\n"
+                    f"ID: {self.logged_in_employee_id}\n"
+                    f"Action: {action.replace('_', ' ')}\n"
+                    f"Score: {float(result['score']):.3f}"
+                )
             )
-            update_verification_ui(True, employee=employee, score=result["score"], message=msg)
-            log_verification(employee_id, True, result["score"], result["reason"])
         else:
-            fail_message = (
-                f"Verification failed. Score={result['score']:.3f}, "
-                f"Best other={result['best_other']:.3f}, "
-                f"Frames={result['frames_passed']}/{result['frames_total']}"
-            )
-            update_verification_ui(False, message=fail_message)
-            log_verification(employee_id, False, result["score"], result["reason"])
+            self._set_status(f"Verification failed: {result['reason']}")
+            messagebox.showerror("Verification", result["reason"])
 
+        self.pending_attendance_action = None
+        self.verify_frames = []
+        self._set_mode("idle")
 
-    def handle_attendance(action):
-        if verified_employee_id is None:
-            set_status("Please verify identity before logging attendance.")
+    def update_camera(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            self.window.after(30, self.update_camera)
             return
 
-        allowed, reason = can_log_action(verified_employee_id, action)
-        if not allowed:
-            set_status(reason)
+        frame = cv2.resize(frame, (self.cam_w, self.cam_h))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
+
+        chosen_face = None
+        if len(faces) > 0:
+            chosen_face = max(faces, key=lambda rect: rect[2] * rect[3])
+
+        for (x, y, w, h) in faces:
+            color = (0, 255, 0) if chosen_face is not None and (x, y, w, h) == tuple(chosen_face) else (255, 255, 0)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+
+        if self.mode == "signup" and chosen_face is not None:
+            self._handle_signup_frame(frame, tuple(chosen_face))
+        elif self.mode == "verify" and chosen_face is not None:
+            self._handle_verify_frame(frame, tuple(chosen_face))
+        elif self.mode in {"signup", "verify"} and chosen_face is None:
+            self._set_status("No face detected. Please face the camera.")
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(rgb)
+        image_tk = ImageTk.PhotoImage(image=image)
+        self.cam_label.imgtk = image_tk
+        self.cam_label.configure(image=image_tk)
+
+        self.window.after(30, self.update_camera)
+
+    def _resolve_target_employee_id(self):
+        return self.logged_in_employee_id
+
+    def user_logs_clicked(self):
+        target_employee_id = self._resolve_target_employee_id()
+        if not target_employee_id:
+            messagebox.showwarning("User Logs", "Login first.")
             return
 
-        log_attendance(verified_employee_id, action, True, verified_score)
-        now_text = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        set_status(f"{action.replace('_', ' ')} recorded for {verified_employee_id} at {now_text}.")
+        logs = get_employee_attendance(target_employee_id, limit=300)
+        sorted_logs = sorted(logs, key=lambda row: row["timestamp"])
 
+        session_rows = []
+        day_sessions = {}
+        for row in sorted_logs:
+            stamp = datetime.fromisoformat(row["timestamp"])
+            day_key = stamp.date().isoformat()
+            day_sessions.setdefault(day_key, {"day": stamp.strftime("%A"), "time_in": "-", "time_out": "-"})
 
-    def process_signup_capture(frame):
-        global signup_active, signup_data, signup_count, last_signup_capture_ts, signup_mode
-        if not signup_active or signup_data is None:
+            if row["action"] == "TIME_IN":
+                if day_sessions[day_key]["time_in"] != "-":
+                    session_rows.append(day_sessions[day_key])
+                    day_sessions[day_key] = {"day": stamp.strftime("%A"), "time_in": "-", "time_out": "-"}
+                day_sessions[day_key]["time_in"] = stamp.strftime("%I:%M %p")
+            elif row["action"] == "TIME_OUT":
+                day_sessions[day_key]["time_out"] = stamp.strftime("%I:%M %p")
+                session_rows.append(day_sessions[day_key])
+                day_sessions[day_key] = {"day": stamp.strftime("%A"), "time_in": "-", "time_out": "-"}
+
+        for session in day_sessions.values():
+            if session["time_in"] != "-" or session["time_out"] != "-":
+                session_rows.append(session)
+
+        ulwindow = tk.Toplevel(self.window)
+        ulwindow.title(f"User Logs - {target_employee_id}")
+        ulwindow.minsize(700, 500)
+        ulwindow.config(bg=BG_COLOR)
+
+        table_frame = tk.Frame(ulwindow, bg=BG_COLOR)
+        table_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        headers = ["No. of Logs", "Day", "Time In", "Time Out"]
+        for col, header_text in enumerate(headers):
+            tk.Label(
+                table_frame,
+                text=header_text,
+                font=("Arial", 10, "bold"),
+                bg=HEADER_COLOR,
+                fg="white",
+                padx=10,
+                pady=10,
+                relief="ridge",
+                borderwidth=2,
+            ).grid(column=col, row=0, sticky="nsew", padx=2, pady=2)
+            table_frame.columnconfigure(col, weight=1)
+
+        if not session_rows:
+            tk.Label(table_frame, text="No logs found.", bg="white").grid(column=0, row=1, columnspan=4, sticky="nsew")
             return
-        if len(current_faces) != 1:
+
+        for idx, session in enumerate(session_rows, start=1):
+            row_data = [str(idx), session["day"], session["time_in"], session["time_out"]]
+            for col_idx, cell_data in enumerate(row_data):
+                tk.Label(
+                    table_frame,
+                    text=cell_data,
+                    font=("Arial", 10),
+                    bg="white",
+                    fg="black",
+                    padx=10,
+                    pady=10,
+                    relief="solid",
+                    borderwidth=1,
+                ).grid(column=col_idx, row=idx, sticky="nsew", padx=2, pady=2)
+
+    def _classify_error(self, reason):
+        text = reason.lower()
+        if "at least" in text and "frame" in text:
+            return "Insufficient Frames"
+        if "no enrolled template" in text or "no enrolled" in text:
+            return "Missing Template"
+        if "consensus" in text or "threshold" in text:
+            return "Threshold Consensus Fail"
+        if "margin" in text or "impostor" in text:
+            return "Impostor Margin Violation"
+        return "Verification Failed"
+
+    def log_error_clicked(self):
+        target_employee_id = self._resolve_target_employee_id()
+        if not target_employee_id:
+            messagebox.showwarning("Log Error", "Login first.")
             return
 
-        now = datetime.now()
-        if last_signup_capture_ts is not None:
-            delta_ms = (now - last_signup_capture_ts).total_seconds() * 1000
-            if delta_ms < 350:
-                return
+        errors = [
+            row
+            for row in get_recent_verification_errors(limit=500)
+            if (row["employee_id"] or "") == target_employee_id
+        ]
+        errors.sort(key=lambda row: row["timestamp"])
 
-        roi = get_face_region(frame, current_faces[0])
-        if not is_face_quality_good(roi):
+        lewindow = tk.Toplevel(self.window)
+        lewindow.title(f"Log Error - {target_employee_id}")
+        lewindow.minsize(760, 500)
+        lewindow.config(bg=BG_COLOR)
+
+        table_frame = tk.Frame(lewindow, bg=BG_COLOR)
+        table_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        headers = ["No. of Error", "Day", "Time", "Type"]
+        for col, header_text in enumerate(headers):
+            tk.Label(
+                table_frame,
+                text=header_text,
+                font=("Arial", 10, "bold"),
+                bg=HEADER_COLOR,
+                fg="white",
+                padx=10,
+                pady=10,
+                relief="ridge",
+                borderwidth=2,
+            ).grid(column=col, row=0, sticky="nsew", padx=2, pady=2)
+            table_frame.columnconfigure(col, weight=1)
+
+        if not errors:
+            tk.Label(table_frame, text="No error logs found.", bg="white").grid(column=0, row=1, columnspan=4, sticky="nsew")
             return
 
-        signup_count += 1
-        save_face_sample(signup_data["employee_id"], roi, signup_count)
-        last_signup_capture_ts = now
-        set_status(f"Capturing face samples: {signup_count}/{MAX_SAMPLES}")
+        for idx, row in enumerate(errors, start=1):
+            stamp = datetime.fromisoformat(row["timestamp"])
+            row_data = [
+                str(idx),
+                stamp.strftime("%A"),
+                stamp.strftime("%I:%M %p"),
+                self._classify_error(row["message"]),
+            ]
+            for col_idx, cell_data in enumerate(row_data):
+                tk.Label(
+                    table_frame,
+                    text=cell_data,
+                    font=("Arial", 10),
+                    bg="white",
+                    fg="black",
+                    padx=10,
+                    pady=10,
+                    relief="solid",
+                    borderwidth=1,
+                ).grid(column=col_idx, row=idx, sticky="nsew", padx=2, pady=2)
 
-        if signup_count >= MAX_SAMPLES:
-            employee_id = signup_data["employee_id"]
-            employee_name = signup_data["full_name"]
+    def log_summary_clicked(self):
+        target_employee_id = self._resolve_target_employee_id()
+        if not target_employee_id:
+            messagebox.showwarning("Log Summary", "Login first.")
+            return
 
-            if signup_mode == "new":
-                add_employee(
-                    signup_data["employee_id"],
-                    signup_data["full_name"],
-                    signup_data["department"],
-                    signup_data["role_position"],
-                    signup_data["contact_number"],
-                    signup_data["email"],
-                )
+        rows = get_employee_attendance(target_employee_id, limit=500)
+        if not rows:
+            messagebox.showinfo("Log Summary", "No attendance logs found for employee.")
+            return
 
-            try:
-                build_employee_template(employee_id)
-            except Exception as ex:
-                signup_active = False
-                signup_data = None
-                signup_mode = "new"
-                set_status(f"Enrollment capture completed but template build failed for {employee_id}: {ex}. Please re-enroll.")
-                return
+        rows = sorted(rows, key=lambda row: row["timestamp"])
 
-            signup_active = False
-            signup_data = None
-            signup_mode = "new"
-            set_status(f"Enrollment complete for {employee_name} ({employee_id}).")
+        # Keep real, date-based aggregates so the chart reflects actual logs, not weekday buckets.
+        log_data = {}
+        for row in rows:
+            stamp = datetime.fromisoformat(row["timestamp"])
+            day_key = stamp.date().isoformat()
+            as_float = stamp.hour + (stamp.minute / 60.0)
+            log_data.setdefault(day_key, {"time_in": [], "time_out": []})
+            if row["action"] == "TIME_IN":
+                log_data[day_key]["time_in"].append(as_float)
+            elif row["action"] == "TIME_OUT":
+                log_data[day_key]["time_out"].append(as_float)
 
+        lswindow = tk.Toplevel(self.window)
+        lswindow.title(f"Log Summary - {target_employee_id}")
+        lswindow.minsize(820, 600)
+        lswindow.config(bg=BG_COLOR)
 
-    def update_camera():
-        global current_faces, current_frame
+        view_state = {"current": "time_in"}
 
-        ret, frame = cap.read()
-        if ret:
-            frame = cv2.resize(frame, (CAM_W, CAM_H))
-            current_frame = frame.copy()
+        button_frame = tk.Frame(lswindow, bg=BG_COLOR)
+        button_frame.pack(side="top", fill="x", padx=10, pady=10)
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(50, 50))
-            current_faces = list(faces)
+        content_frame = tk.Frame(lswindow, bg=BG_COLOR)
+        content_frame.pack(fill="both", expand=True, padx=8, pady=8)
 
-            if len(faces) == 1:
-                roi = get_face_region(current_frame, faces[0])
-                if roi is not None and is_face_quality_good(roi):
-                    face_history.append(roi)
+        graph_frame = tk.Frame(content_frame, bg="white", relief="solid", borderwidth=1)
+        graph_frame.pack(side="left", fill="both", expand=True)
 
-            grid_color = (128, 0, 0)
-            for i in range(1, 3):
-                x = int(CAM_W * i / 3)
-                cv2.line(frame, (x, 0), (x, CAM_H), grid_color, 1)
-            for i in range(1, 3):
-                y = int(CAM_H * i / 3)
-                cv2.line(frame, (0, y), (CAM_W, y), grid_color, 1)
+        stats_frame = tk.Frame(content_frame, bg=FORM_BG, width=220)
+        stats_frame.pack(side="right", fill="both", padx=(8, 0))
+        stats_frame.pack_propagate(False)
 
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        stats_content_frame = tk.Frame(stats_frame, bg=FORM_BG)
+        stats_content_frame.pack(fill="both", expand=True, padx=8, pady=8)
 
-            # Show quality feedback during signup
-            quality_msg = ""
-            if signup_active and signup_data is not None:
-                cv2.putText(
-                    frame,
-                    f"ENROLLING: {signup_count}/{MAX_SAMPLES}",
-                    (10, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.75,
-                    (0, 255, 255),
-                    2,
-                )
-                if len(current_faces) == 0:
-                    quality_msg = "No face detected"
-                elif len(current_faces) > 1:
-                    quality_msg = "Multiple faces - need only one"
+        time_in_btn = tk.Button(
+            button_frame,
+            text="Time In",
+            bg=ACCENT_COLOR,
+            fg="black",
+            command=lambda: update_view("time_in"),
+        )
+        time_out_btn = tk.Button(
+            button_frame,
+            text="Time Out",
+            bg=HEADER_COLOR,
+            fg="white",
+            command=lambda: update_view("time_out"),
+        )
+        time_in_btn.pack(side="left", padx=5)
+        time_out_btn.pack(side="left", padx=5)
+
+        def update_view(view_type):
+            view_state["current"] = view_type
+            if view_type == "time_in":
+                time_in_btn.config(bg=ACCENT_COLOR, fg="black")
+                time_out_btn.config(bg=HEADER_COLOR, fg="white")
+            else:
+                time_in_btn.config(bg=HEADER_COLOR, fg="white")
+                time_out_btn.config(bg=ACCENT_COLOR, fg="black")
+            update_graph_and_stats()
+
+        def update_graph_and_stats():
+            for widget in graph_frame.winfo_children():
+                widget.destroy()
+            for widget in stats_content_frame.winfo_children():
+                widget.destroy()
+
+            days = list(sorted(log_data.keys()))
+            day_numbers = np.arange(len(days))
+            fig = Figure(figsize=(6, 4), dpi=100)
+            ax = fig.add_subplot(111)
+
+            if view_state["current"] == "time_in":
+                early_count = 0
+                late_count = 0
+                times_to_plot = []
+                for day in days:
+                    values = log_data[day]["time_in"]
+                    if values:
+                        earliest = min(values)  # earliest time in
+                        times_to_plot.append(float(earliest))
+                        if earliest <= 9.0:  # standard 9AM threshold
+                            early_count += 1
+                        else:
+                            late_count += 1
+                    else:
+                        times_to_plot.append(np.nan)
+
+                tk.Label(stats_content_frame, text=f"Early/On-time: {early_count}", bg="#106919", fg="white").pack(fill="x", pady=4)
+                tk.Label(stats_content_frame, text=f"Late: {late_count}", bg="#8b221e", fg="white").pack(fill="x", pady=4)
+
+                total = early_count + late_count
+                status = "NO DATA" if total == 0 else ("LATE" if late_count > early_count else "ON TIME")
+                status_bg = "#9a2925" if status == "LATE" else "#5cb85c"
+                if status == "NO DATA":
+                    status_bg = "#555555"
+                tk.Label(stats_content_frame, text=status, bg=status_bg, fg="white", font=("Arial", 11, "bold")).pack(fill="x", pady=10)
+
+                lines = ax.plot(day_numbers, times_to_plot, marker="o", markersize=8, linewidth=3, color="#1f77b4", label="Time In")
+                ax.set_title("Earliest Time In by Day", fontsize=14, fontweight="bold", pad=10)
+                
+                # Dynamic Y-axis
+                if any(not np.isnan(v) for v in times_to_plot):
+                    valid_times = [v for v in times_to_plot if not np.isnan(v)]
+                    ax.set_ylim([max(0, min(valid_times) - 1), min(24, max(valid_times) + 1)])
                 else:
-                    roi = get_face_region(current_frame, current_faces[0])
-                    _, reason = is_face_quality_good(roi, return_reason=True)
-                    if reason != "OK":
-                        quality_msg = reason
-                process_signup_capture(current_frame)
+                    ax.set_ylim([6.5, 10])
+            else:
+                overtime_count = 0
+                undertime_count = 0
+                times_to_plot = []
+                for day in days:
+                    values = log_data[day]["time_out"]
+                    if values:
+                        latest = max(values)  # latest time out
+                        times_to_plot.append(float(latest))
+                        if latest >= 17.0:  # standard 5PM threshold
+                            overtime_count += 1
+                        else:
+                            undertime_count += 1
+                    else:
+                        times_to_plot.append(np.nan)
 
-            if quality_msg:
-                cv2.putText(
-                    frame,
-                    quality_msg,
-                    (10, CAM_H - 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.65,
-                    (0, 0, 255),
-                    2,
-                )
+                tk.Label(stats_content_frame, text=f"Overtime/On-time: {overtime_count}", bg="#1da22a", fg="white").pack(fill="x", pady=4)
+                tk.Label(stats_content_frame, text=f"Undertime: {undertime_count}", bg="#b31616", fg="white").pack(fill="x", pady=4)
 
-            if verified_employee_id:
-                cv2.putText(
-                    frame,
-                    f"VERIFIED: {verified_employee_id}",
-                    (10, CAM_H - 14),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.68,
-                    (0, 255, 0),
-                    2,
-                )
+                total = overtime_count + undertime_count
+                status = "NO DATA" if total == 0 else ("UNDERTIME" if undertime_count > overtime_count else "ON TIME")
+                status_bg = "#d9534f" if status == "UNDERTIME" else "#5cb85c"
+                if status == "NO DATA":
+                    status_bg = "#555555"
+                tk.Label(stats_content_frame, text=status, bg=status_bg, fg="white", font=("Arial", 11, "bold")).pack(fill="x", pady=10)
 
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(rgb)
-            imgtk = ImageTk.PhotoImage(image=img)
-            cam_label.imgtk = imgtk
-            cam_label.configure(image=imgtk)
+                lines = ax.plot(day_numbers, times_to_plot, marker="o", markersize=8, linewidth=3, color="#ff7f0e", label="Time Out")
+                ax.set_title("Latest Time Out by Day", fontsize=14, fontweight="bold", pad=10)
+                
+                if any(not np.isnan(v) for v in times_to_plot):
+                    valid_times = [v for v in times_to_plot if not np.isnan(v)]
+                    ax.set_ylim([max(0, min(valid_times) - 1), min(24, max(valid_times) + 1)])
+                else:
+                    ax.set_ylim([15, 20])
 
-        window.after(30, update_camera)
+            ax.set_xticks(day_numbers)
+            ax.set_xticklabels(days, rotation=45, ha="right", fontsize=11)
+            ax.set_ylabel("Time (24h)", fontsize=12, fontweight="bold")
+            ax.tick_params(axis='y', labelsize=11)
+            ax.grid(True, alpha=0.4, linestyle='--')
+            ax.legend(fontsize=11)
+            fig.tight_layout()
+
+            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+
+            annot = ax.annotate("", xy=(0,0), xytext=(10,10), textcoords="offset points",
+                                bbox=dict(boxstyle="round4,pad=.5", fc="white", ec="gray", lw=1),
+                                arrowprops=dict(arrowstyle="-|>", connectionstyle="arc3,rad=-0.2", color="gray"))
+            annot.set_visible(False)
+            
+            def hover(event):
+                vis = annot.get_visible()
+                if event.inaxes == ax and lines:
+                    cont, ind = lines[0].contains(event)
+                    if cont:
+                        x_data, y_data = lines[0].get_data()
+                        idx = ind["ind"][0]
+                        annot.xy = (x_data[idx], y_data[idx])
+                        text = f"Date: {days[idx]}\nTime: {y_data[idx]:.2f}"
+                        annot.set_text(text)
+                        annot.set_visible(True)
+                        canvas.draw_idle()
+                    else:
+                        if vis:
+                            annot.set_visible(False)
+                            canvas.draw_idle()
+
+            canvas.mpl_connect("motion_notify_event", hover)
+            
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        update_graph_and_stats()
+
+    def _begin_reenroll(self, employee_id):
+        employee = get_employee(employee_id)
+        if employee is None:
+            messagebox.showerror("Re-enroll", "Employee not found.")
+            return
+
+        self._activate_employee_session(employee_id)
+        self._show_section("biometric")
+        self.start_enrollment()
+
+    def _on_close(self):
+        if self.cap is not None:
+            self.cap.release()
+        self.window.destroy()
+
+    def run(self):
+        self.window.mainloop()
 
 
-    def on_close():
-        cap.release()
-        window.destroy()
-
-    header_buttons = tk.Frame(header, bg=HEADER_COLOR)
-    header_buttons.pack(side="right")
-    tk.Button(header_buttons, text="User Logs", command=user_logs_clicked).pack(side="left", padx=3)
-    tk.Button(header_buttons, text="Log Error", command=log_error_clicked).pack(side="left", padx=3)
-    tk.Button(header_buttons, text="Summary", command=log_summary_clicked).pack(side="left", padx=3)
-    tk.Button(header_buttons, text="Admin Panel", command=open_admin_panel).pack(side="left", padx=3)
-
-    content_frame = tk.Frame(window, bg="light gray", padx=10, pady=10)
-    content_frame.pack(side="top", fill="both", expand=True)
-    content_frame.columnconfigure(0, weight=3)
-    content_frame.columnconfigure(1, weight=2)
-    content_frame.rowconfigure(0, weight=1)
-
-    # Camera container: use flat relief and zero border to avoid a visible black outline
-    camera_frame = tk.Frame(content_frame, bg="black", bd=0, relief="flat")
-    camera_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-    camera_frame.columnconfigure(0, weight=1)
-    camera_frame.rowconfigure(0, weight=1)
-
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    cap = cv2.VideoCapture(0)
-    ret, test_frame = cap.read()
-    if ret:
-        native_h, native_w = test_frame.shape[:2]
-    else:
-        native_w, native_h = 700, 700
-
-    CAM_W = 600
-    CAM_H = int(CAM_W * native_h / native_w)
-    # label showing camera image; remove highlight/border thickness to avoid frame border
-    cam_label = tk.Label(camera_frame, bg="black", bd=0, highlightthickness=0)
-    cam_label.grid(row=0, column=0, sticky="nsew")
-
-    side_frame = tk.Frame(content_frame, bg="#4e4d4d", bd=2, relief="ridge")
-    side_frame.grid(row=0, column=1, sticky="nsew")
-    side_frame.columnconfigure(0, weight=1)
-
-    verification_label = tk.Label(
-        side_frame,
-        textvariable=verification_var,
-        font=("Arial", 12, "bold"),
-        bg="#caab2f",
-        fg="white",
-        height=2,
-    )
-    verification_label.grid(row=0, column=0, sticky="ew")
-
-    profile_value = tk.Label(
-        side_frame,
-        text="No verified employee.",
-        justify="left",
-        anchor="w",
-        bg="#4e4d4d",
-        fg="white",
-    )
-    profile_value.grid(row=1, column=0, sticky="ew", padx=10, pady=(8, 4))
-
-    form_frame = tk.Frame(side_frame, bg="#4e4d4d")
-    form_frame.grid(row=2, column=0, sticky="ew", padx=10)
-    form_frame.columnconfigure(1, weight=1)
-
-    entry_employee_id = create_entry_row(form_frame, 0, "Employee ID")
-    entry_full_name = create_entry_row(form_frame, 1, "Full Name")
-    entry_department = create_entry_row(form_frame, 2, "Department")
-    entry_role = create_entry_row(form_frame, 3, "Role")
-    entry_contact = create_entry_row(form_frame, 4, "Contact")
-    entry_email = create_entry_row(form_frame, 5, "Email")
-
-    button_group = tk.Frame(side_frame, bg="#4e4d4d")
-    button_group.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
-    button_group.columnconfigure(0, weight=1)
-    button_group.columnconfigure(1, weight=1)
-
-    tk.Button(button_group, text="Start Signup", command=start_signup).grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=2)
-    tk.Button(button_group, text="Cancel Signup", command=stop_signup).grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=2)
-    tk.Button(button_group, text="Verify Identity", command=verify_identity).grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=2)
-    tk.Button(button_group, text="Clear Verification", command=lambda: update_verification_ui(False)).grid(
-        row=1, column=1, sticky="ew", padx=(4, 0), pady=2
-    )
-    tk.Button(button_group, text="Time In", command=lambda: handle_attendance("TIME_IN")).grid(
-        row=2, column=0, sticky="ew", padx=(0, 4), pady=2
-    )
-    tk.Button(button_group, text="Time Out", command=lambda: handle_attendance("TIME_OUT")).grid(
-        row=2, column=1, sticky="ew", padx=(4, 0), pady=2
-    )
-
-    security_hint = tk.Label(
-        side_frame,
-        text="Security mode: local multi-frame verification with quality and impostor checks.",
-        bg="#4e4d4d",
-        fg="#ffd27d",
-        justify="left",
-        wraplength=320,
-    )
-    security_hint.grid(row=4, column=0, sticky="ew", padx=10, pady=(4, 8))
-
-    status_label = tk.Label(
-        window,
-        textvariable=status_var,
-        anchor="w",
-        justify="left",
-        bg="#e1e1e1",
-        fg="#1f1f1f",
-        relief="sunken",
-        padx=8,
-    )
-    status_label.pack(side="bottom", fill="x")
-
-    window.protocol("WM_DELETE_WINDOW", on_close)
-    update_camera()
-    window.mainloop()
-    
-    #end
+if __name__ == "__main__":
+    HRISApp().run()
