@@ -785,7 +785,7 @@ def get_daily_summary(manager_id: Optional[str] = None) -> List[Dict[str, Any]]:
                     COUNT(*) AS total_actions
                 FROM attendance_logs a
                 INNER JOIN employees e ON a.employee_id = e.employee_id
-                WHERE e.manager_id = ?
+                WHERE e.manager_id = ? OR e.manager_id IS NULL OR e.manager_id = ''
                 GROUP BY date(a.timestamp)
                 ORDER BY day DESC
                 """,
